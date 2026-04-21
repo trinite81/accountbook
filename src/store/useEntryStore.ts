@@ -7,8 +7,10 @@ interface EntryStore {
   entries: JournalEntry[]
   init: () => void
   addEntry: (date: string, description: string, lines: JournalEntryLine[]) => void
+  addEntries: (entries: JournalEntry[]) => void
   updateEntry: (id: string, date: string, description: string, lines: JournalEntryLine[]) => void
   deleteEntry: (id: string) => void
+  replaceAll: (entries: JournalEntry[]) => void
 }
 
 export const useEntryStore = create<EntryStore>((set, get) => ({
@@ -33,6 +35,12 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
     set({ entries: next })
   },
 
+  addEntries(newEntries) {
+    const next = [...newEntries, ...get().entries].sort((a, b) => b.date.localeCompare(a.date))
+    saveEntries(next)
+    set({ entries: next })
+  },
+
   updateEntry(id, date, description, lines) {
     const next = get().entries.map((e) =>
       e.id === id ? { ...e, date, description, lines, updatedAt: new Date().toISOString() } : e
@@ -45,5 +53,10 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
     const next = get().entries.filter((e) => e.id !== id)
     saveEntries(next)
     set({ entries: next })
+  },
+
+  replaceAll(entries) {
+    saveEntries(entries)
+    set({ entries })
   },
 }))

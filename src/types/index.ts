@@ -5,6 +5,9 @@ export interface Account {
   name: string
   type: AccountType
   description?: string
+  color: string
+  icon: string
+  isActive: boolean
   isDefault: boolean
   createdAt: string
 }
@@ -13,7 +16,6 @@ export interface JournalEntryLine {
   accountId: string
   debit: number
   credit: number
-  memo?: string
 }
 
 export interface JournalEntry {
@@ -33,10 +35,10 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   expense: '비용',
 }
 
-export const ACCOUNT_TYPE_COLORS: Record<AccountType, string> = {
-  asset: 'text-blue-600',
-  liability: 'text-red-600',
-  equity: 'text-purple-600',
-  revenue: 'text-green-600',
-  expense: 'text-orange-600',
+export const ACCOUNT_TYPE_BADGE_CLASSES: Record<AccountType, string> = {
+  asset: 'bg-blue-100 text-blue-700',
+  liability: 'bg-red-100 text-red-700',
+  equity: 'bg-purple-100 text-purple-700',
+  revenue: 'bg-green-100 text-green-700',
+  expense: 'bg-orange-100 text-orange-700',
 }

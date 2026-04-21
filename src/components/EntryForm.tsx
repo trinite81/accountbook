@@ -1,159 +1,165 @@
 import { useState } from 'react'
-import { Plus, Trash2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { AccountIcon } from '@/components/AccountIcon'
 import { useAccountStore } from '@/store/useAccountStore'
-import { useEntryStore } from '@/store/useEntryStore'
-import { ACCOUNT_TYPE_LABELS } from '@/types'
+import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_BADGE_CLASSES } from '@/types'
 import { todayISO } from '@/lib/utils'
-import type { JournalEntryLine, AccountType } from '@/types'
+import type { AccountType } from '@/types'
 
-const ACCOUNT_TYPE_ORDER: AccountType[] = ['asset', 'liability', 'equity', 'revenue', 'expense']
+const ACCOUNT_TYPE_ORDER: AccountType[] = ['asset', 'liability', 'revenue', 'expense']
 
-interface EntryFormProps {
-  onSuccess?: () => void
+export interface EntryFormValues {
+  date: string
+  description: string
+  amount: number
+  debitAccountId: string
+  creditAccountId: string
 }
 
-export function EntryForm({ onSuccess }: EntryFormProps) {
+interface EntryFormProps {
+  initialValues?: Partial<EntryFormValues>
+  onSubmit: (values: EntryFormValues) => void
+  onCancel?: () => void
+  submitLabel?: string
+}
+
+export function EntryForm({ initialValues, onSubmit, onCancel, submitLabel = '저장' }: EntryFormProps) {
   const accounts = useAccountStore((s) => s.accounts)
-  const addEntry = useEntryStore((s) => s.addEntry)
+  const activeAccounts = accounts.filter((a) => a.isActive)
 
-  const [date, setDate] = useState(todayISO())
-  const [description, setDescription] = useState('')
-  const [lines, setLines] = useState<Partial<JournalEntryLine>[]>([
-    { accountId: '', debit: 0, credit: 0 },
-    { accountId: '', debit: 0, credit: 0 },
-  ])
+  const [date, setDate] = useState(initialValues?.date ?? todayISO())
+  const [description, setDescription] = useState(initialValues?.description ?? '')
+  const [amount, setAmount] = useState(initialValues?.amount ? String(initialValues.amount) : '')
+  const [debitId, setDebitId] = useState(initialValues?.debitAccountId ?? '')
+  const [creditId, setCreditId] = useState(initialValues?.creditAccountId ?? '')
 
-  const totalDebit = lines.reduce((s, l) => s + (l.debit ?? 0), 0)
-  const totalCredit = lines.reduce((s, l) => s + (l.credit ?? 0), 0)
-  const isBalanced = totalDebit > 0 && totalDebit === totalCredit
-
-  function updateLine(index: number, field: keyof JournalEntryLine, value: string | number) {
-    setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)))
-  }
-
-  function addLine() {
-    setLines((prev) => [...prev, { accountId: '', debit: 0, credit: 0 }])
-  }
-
-  function removeLine(index: number) {
-    setLines((prev) => prev.filter((_, i) => i !== index))
-  }
+  const isValid = description.trim() && Number(amount) > 0 && debitId && creditId && debitId !== creditId
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!isBalanced || !description) return
-    const validLines = lines.filter((l) => l.accountId && (l.debit! > 0 || l.credit! > 0))
-    addEntry(date, description, validLines as JournalEntryLine[])
-    setDescription('')
-    setDate(todayISO())
-    setLines([
-      { accountId: '', debit: 0, credit: 0 },
-      { accountId: '', debit: 0, credit: 0 },
-    ])
-    onSuccess?.()
+    if (!isValid) return
+    onSubmit({ date, description: description.trim(), amount: Number(amount), debitAccountId: debitId, creditAccountId: creditId })
   }
 
   const groupedAccounts = ACCOUNT_TYPE_ORDER.map((type) => ({
     type,
     label: ACCOUNT_TYPE_LABELS[type],
-    accounts: accounts.filter((a) => a.type === type),
+    accounts: activeAccounts.filter((a) => a.type === type),
   })).filter((g) => g.accounts.length > 0)
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="space-y-1.5">
-          <Label htmlFor="date">날짜</Label>
-          <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          <Label htmlFor="ef-date">날짜</Label>
+          <Input id="ef-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="ef-desc">거래 설명</Label>
+          <Input id="ef-desc" placeholder="예: 급여 수령" value={description} onChange={(e) => setDescription(e.target.value)} required />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="description">적요</Label>
-          <Input id="description" placeholder="거래 설명" value={description} onChange={(e) => setDescription(e.target.value)} required />
+          <Label htmlFor="ef-amount">금액 (원)</Label>
+          <Input
+            id="ef-amount"
+            type="number"
+            min={1}
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="text-right"
+            required
+          />
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="grid grid-cols-[1fr_100px_100px_36px] gap-2 text-xs font-medium text-muted-foreground px-1">
-          <span>계정과목</span>
-          <span className="text-center">차변 (Debit)</span>
-          <span className="text-center">대변 (Credit)</span>
-          <span />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>
+            차변 계정 <span className="text-xs text-blue-500 font-normal">(Debit — 증가하는 계정)</span>
+          </Label>
+          <AccountSelect
+            value={debitId}
+            onChange={setDebitId}
+            grouped={groupedAccounts}
+            placeholder="차변 계정 선택"
+          />
         </div>
+        <div className="space-y-1.5">
+          <Label>
+            대변 계정 <span className="text-xs text-red-500 font-normal">(Credit — 감소하는 계정)</span>
+          </Label>
+          <AccountSelect
+            value={creditId}
+            onChange={setCreditId}
+            grouped={groupedAccounts}
+            placeholder="대변 계정 선택"
+          />
+        </div>
+      </div>
 
-        {lines.map((line, i) => (
-          <div key={i} className="grid grid-cols-[1fr_100px_100px_36px] gap-2 items-center">
-            <Select value={line.accountId ?? ''} onValueChange={(v) => updateLine(i, 'accountId', v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="계정 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                {groupedAccounts.map((g) => (
-                  <SelectGroup key={g.type}>
-                    <SelectLabel>{g.label}</SelectLabel>
-                    {g.accounts.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              type="number"
-              min={0}
-              placeholder="0"
-              value={line.debit || ''}
-              onChange={(e) => updateLine(i, 'debit', Number(e.target.value))}
-              className="text-right"
-            />
-            <Input
-              type="number"
-              min={0}
-              placeholder="0"
-              value={line.credit || ''}
-              onChange={(e) => updateLine(i, 'credit', Number(e.target.value))}
-              className="text-right"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => removeLine(i)}
-              disabled={lines.length <= 2}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        ))}
+      {debitId && creditId && debitId === creditId && (
+        <p className="text-xs text-destructive">차변과 대변 계정이 같을 수 없습니다.</p>
+      )}
 
-        <Button type="button" variant="outline" size="sm" onClick={addLine} className="w-full">
-          <Plus className="h-4 w-4 mr-1" /> 행 추가
+      <div className="flex gap-2">
+        <Button type="submit" className="flex-1" disabled={!isValid}>
+          {submitLabel}
         </Button>
-      </div>
-
-      <div className="flex items-center justify-between border-t pt-3">
-        <div className="flex gap-4 text-sm">
-          <span>
-            차변 합계: <strong className="text-blue-600">{totalDebit.toLocaleString('ko-KR')}원</strong>
-          </span>
-          <span>
-            대변 합계: <strong className="text-red-600">{totalCredit.toLocaleString('ko-KR')}원</strong>
-          </span>
-        </div>
-        {!isBalanced && totalDebit + totalCredit > 0 && (
-          <span className="flex items-center gap-1 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" /> 차변≠대변
-          </span>
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel}>
+            취소
+          </Button>
         )}
       </div>
-
-      <Button type="submit" className="w-full" disabled={!isBalanced || !description}>
-        거래 저장
-      </Button>
     </form>
+  )
+}
+
+function AccountSelect({
+  value, onChange, grouped, placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  grouped: { type: AccountType; label: string; accounts: ReturnType<typeof useAccountStore.getState>['accounts'] }[]
+  placeholder: string
+}) {
+  const allAccounts = grouped.flatMap((g) => g.accounts)
+  const selected = allAccounts.find((a) => a.id === value)
+
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger>
+        {selected ? (
+          <span className="flex items-center gap-2">
+            <AccountIcon icon={selected.icon} color={selected.color} size="sm" />
+            <span>{selected.name}</span>
+            <span className={`ml-1 text-xs px-1.5 py-0.5 rounded-full ${ACCOUNT_TYPE_BADGE_CLASSES[selected.type]}`}>
+              {ACCOUNT_TYPE_LABELS[selected.type]}
+            </span>
+          </span>
+        ) : (
+          <SelectValue placeholder={placeholder} />
+        )}
+      </SelectTrigger>
+      <SelectContent>
+        {grouped.map((g) => (
+          <SelectGroup key={g.type}>
+            <SelectLabel>{g.label}</SelectLabel>
+            {g.accounts.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                <span className="flex items-center gap-2">
+                  <AccountIcon icon={a.icon} color={a.color} size="sm" />
+                  {a.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
