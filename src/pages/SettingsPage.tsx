@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Plus, Trash2, RotateCcw, Download, Upload, Database, Pencil } from 'lucide-react'
+import { Plus, Trash2, RotateCcw, Download, Upload, Database, Pencil, CalendarRange } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_BADGE_CLASSES } from '@/types'
 import { ICON_OPTIONS, COLOR_OPTIONS } from '@/lib/iconMap'
 import { generateSampleEntries } from '@/lib/sampleData'
 import { exportJSON, exportCSV, parseImportJSON } from '@/lib/exportImport'
+import { todayISO } from '@/lib/utils'
 import type { AccountType, Account } from '@/types'
 
 const ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'revenue', 'expense']
@@ -24,6 +25,8 @@ interface AccountFormState {
   description: string
   color: string
   icon: string
+  startDate: string
+  endDate: string
 }
 
 const DEFAULT_FORM: AccountFormState = {
@@ -32,6 +35,8 @@ const DEFAULT_FORM: AccountFormState = {
   description: '',
   color: '#64748b',
   icon: 'more',
+  startDate: todayISO(),
+  endDate: '',
 }
 
 export function SettingsPage() {
@@ -50,21 +55,33 @@ export function SettingsPage() {
   }
 
   function openEdit(account: Account) {
-    setForm({ name: account.name, type: account.type, description: account.description ?? '', color: account.color, icon: account.icon })
+    setForm({ name: account.name, type: account.type, description: account.description ?? '', color: account.color, icon: account.icon, startDate: account.startDate, endDate: account.endDate ?? '' })
     setEditTarget(account)
   }
 
   function handleAddSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
-    addAccount({ name: form.name.trim(), type: form.type, description: form.description, color: form.color, icon: form.icon })
+    addAccount({ name: form.name.trim(), type: form.type, description: form.description, color: form.color, icon: form.icon, startDate: form.startDate, endDate: form.endDate || undefined })
     setAddOpen(false)
   }
 
   function handleEditSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!editTarget || !form.name.trim()) return
-    updateAccount(editTarget.id, { name: form.name.trim(), type: form.type, description: form.description, color: form.color, icon: form.icon })
+    const newStart = form.startDate
+    const newEnd = form.endDate || undefined
+    const conflictingEntries = entries.filter((entry) =>
+      entry.lines.some((line) => line.accountId === editTarget.id) &&
+      (entry.date < newStart || (newEnd && entry.date > newEnd))
+    )
+    if (conflictingEntries.length > 0) {
+      const earliest = conflictingEntries.reduce((a, b) => a.date < b.date ? a : b).date
+      const latest = conflictingEntries.reduce((a, b) => a.date > b.date ? a : b).date
+      alert(`날짜 범위를 변경할 수 없습니다.\n이 계정을 사용하는 거래가 ${conflictingEntries.length}건 있으며,\n가장 이른 날짜: ${earliest}, 가장 늦은 날짜: ${latest}\n설정하려는 범위(${newStart} ~ ${newEnd ?? '무제한'})를 벗어납니다.`)
+      return
+    }
+    updateAccount(editTarget.id, { name: form.name.trim(), type: form.type, description: form.description, color: form.color, icon: form.icon, startDate: newStart, endDate: newEnd })
     setEditTarget(null)
   }
 
@@ -146,6 +163,10 @@ export function SettingsPage() {
                         {account.description && (
                           <p className="text-xs text-muted-foreground truncate">{account.description}</p>
                         )}
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <CalendarRange className="h-3 w-3 shrink-0" />
+                          {account.startDate}{account.endDate ? ` ~ ${account.endDate}` : ' ~'}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -192,7 +213,7 @@ export function SettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Button variant="outline" size="sm" onClick={handleSampleData} className="gap-1.5 justify-start">
               <Database className="h-4 w-4 text-purple-500" />
-              샘플 데이터 생성 (3개월치)
+              샘플 데이터 생성 (12개월치)
             </Button>
             <Button variant="outline" size="sm" onClick={handleExportJSON} className="gap-1.5 justify-start">
               <Download className="h-4 w-4 text-blue-500" />
@@ -216,7 +237,7 @@ export function SettingsPage() {
 
       {/* 계정 추가 다이얼로그 */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100%-2rem)] max-w-md">
           <DialogHeader><DialogTitle>계정 추가</DialogTitle></DialogHeader>
           <AccountFormBody form={form} onChange={setForm} onSubmit={handleAddSubmit} onCancel={() => setAddOpen(false)} submitLabel="추가" />
         </DialogContent>
@@ -224,7 +245,7 @@ export function SettingsPage() {
 
       {/* 계정 수정 다이얼로그 */}
       <Dialog open={!!editTarget} onOpenChange={(o) => !o && setEditTarget(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100%-2rem)] max-w-md">
           <DialogHeader><DialogTitle>계정 수정</DialogTitle></DialogHeader>
           <AccountFormBody form={form} onChange={setForm} onSubmit={handleEditSubmit} onCancel={() => setEditTarget(null)} submitLabel="저장" />
         </DialogContent>
@@ -232,7 +253,7 @@ export function SettingsPage() {
 
       {/* 초기화 확인 다이얼로그 */}
       <Dialog open={resetConfirm} onOpenChange={setResetConfirm}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[calc(100%-2rem)] max-w-sm">
           <DialogHeader><DialogTitle>기본값으로 초기화</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">모든 계정이 기본 계정으로 교체됩니다. 거래 내역은 유지되지만 삭제된 계정 참조가 깨질 수 있습니다. 계속하시겠습니까?</p>
           <div className="flex gap-2 mt-2">
@@ -318,6 +339,16 @@ function AccountFormBody({
       <div className="space-y-1.5">
         <Label>설명 (선택)</Label>
         <Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="계정에 대한 메모" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>시작 날짜</Label>
+          <Input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} required />
+        </div>
+        <div className="space-y-1.5">
+          <Label>종료 날짜 <span className="text-xs text-muted-foreground font-normal">(비우면 무제한)</span></Label>
+          <Input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} min={form.startDate} />
+        </div>
       </div>
       <div className="flex gap-2">
         <Button type="submit" className="flex-1">{submitLabel}</Button>

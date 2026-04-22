@@ -9,6 +9,8 @@ export interface Account {
   icon: string
   isActive: boolean
   isDefault: boolean
+  startDate: string    // YYYY-MM-DD, 이 날짜부터 사용 가능
+  endDate?: string     // YYYY-MM-DD, undefined = 무제한
   createdAt: string
 }
 

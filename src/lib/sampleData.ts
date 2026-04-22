@@ -1,31 +1,27 @@
 import type { Account, JournalEntry } from '@/types'
 import { generateId } from './utils'
 
-function daysAgo(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
-}
-
 export function generateSampleEntries(accounts: Account[]): JournalEntry[] {
   const get = (name: string) => accounts.find((a) => a.name === name)?.id ?? ''
 
-  const cash = get('현금')
-  const bank = get('은행계좌')
-  const card = get('신용카드')
-  const cardDebt = get('신용카드미결제')
-  const salary = get('급여')
-  const sideIncome = get('부수입')
-  const food = get('식비')
-  const transport = get('교통비')
-  const housing = get('주거비')
-  const telecom = get('통신비')
-  const health = get('의료비')
-  const culture = get('문화/여가')
-  const other = get('기타비용')
+  const cash         = get('현금')
+  const bank         = get('은행계좌')
+  const card         = get('신용카드')
+  const cardDebt     = get('신용카드미결제')
+  const salary       = get('급여')
+  const sideIncome   = get('부수입')
+  const interestIncome = get('이자수입')
+  const food         = get('식비')
+  const transport    = get('교통비')
+  const housing      = get('주거비')
+  const telecom      = get('통신비')
+  const health       = get('의료비')
+  const culture      = get('문화/여가')
+  const other        = get('기타비용')
 
-  const now = new Date().toISOString()
-  function entry(date: string, description: string, debitId: string, creditId: string, amount: number): JournalEntry {
+  const nowISO = new Date().toISOString()
+
+  function makeEntry(date: string, description: string, debitId: string, creditId: string, amount: number): JournalEntry {
     return {
       id: generateId(),
       date,
@@ -34,71 +30,184 @@ export function generateSampleEntries(accounts: Account[]): JournalEntry[] {
         { accountId: debitId, debit: amount, credit: 0 },
         { accountId: creditId, debit: 0, credit: amount },
       ],
-      createdAt: now,
-      updatedAt: now,
+      createdAt: nowISO,
+      updatedAt: nowISO,
     }
   }
 
-  return [
-    // 3달치 급여
-    entry(daysAgo(90), '3월 급여 수령', bank, salary, 3_500_000),
-    entry(daysAgo(60), '4월 급여 수령', bank, salary, 3_500_000),
-    entry(daysAgo(30), '5월 급여 수령', bank, salary, 3_500_000),
-    entry(daysAgo(5), '6월 급여 수령', bank, salary, 3_500_000),
+  function fmt(year: number, month: number, day: number): string {
+    const lastDay = new Date(year, month, 0).getDate()
+    const d = Math.min(day, lastDay)
+    return `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  }
 
-    // 부수입
-    entry(daysAgo(75), '프리랜서 작업비', cash, sideIncome, 300_000),
-    entry(daysAgo(20), '중고물품 판매', cash, sideIncome, 85_000),
+  function dayOfWeek(year: number, month: number, day: number): number {
+    return new Date(year, month - 1, day).getDay() // 0=Sun, 6=Sat
+  }
 
-    // 주거비 (월세)
-    entry(daysAgo(88), '3월 월세', housing, bank, 700_000),
-    entry(daysAgo(58), '4월 월세', housing, bank, 700_000),
-    entry(daysAgo(28), '5월 월세', housing, bank, 700_000),
+  // Collect target months (past 12 months including current)
+  const today = new Date()
+  const months: Array<{ year: number; month: number; idx: number }> = []
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
+    months.push({ year: d.getFullYear(), month: d.getMonth() + 1, idx: 11 - i })
+  }
 
-    // 통신비
-    entry(daysAgo(85), '3월 통신비', telecom, bank, 55_000),
-    entry(daysAgo(55), '4월 통신비', telecom, bank, 55_000),
-    entry(daysAgo(25), '5월 통신비', telecom, bank, 55_000),
+  const lunchItems = [
+    ['직장 근처 한식', 8_500], ['편의점 점심', 4_500], ['김밥천국', 7_000],
+    ['설렁탕', 10_000], ['비빔밥', 9_000], ['냉면', 11_000],
+    ['돈까스 정식', 9_500], ['백반', 7_500], ['국밥', 8_000],
+    ['초밥 런치', 13_000], ['우동', 8_000], ['덮밥', 9_000],
+    ['샐러드 카페', 11_000], ['짜장면', 7_000], ['볶음밥', 8_500],
+    ['칼국수', 9_000], ['라면 + 공기밥', 5_500], ['샌드위치', 6_500],
+  ] as const
 
-    // 식비
-    entry(daysAgo(87), '마트 장보기', food, card, 95_000),
-    entry(daysAgo(82), '점심 외식', food, cash, 12_000),
-    entry(daysAgo(79), '저녁 외식', food, cash, 35_000),
-    entry(daysAgo(70), '편의점', food, cash, 8_500),
-    entry(daysAgo(65), '배달 음식', food, card, 28_000),
-    entry(daysAgo(57), '마트 장보기', food, card, 78_000),
-    entry(daysAgo(50), '회식', food, card, 45_000),
-    entry(daysAgo(42), '카페', food, cash, 15_000),
-    entry(daysAgo(35), '마트 장보기', food, card, 112_000),
-    entry(daysAgo(27), '점심 외식', food, cash, 11_000),
-    entry(daysAgo(21), '저녁 외식', food, card, 62_000),
-    entry(daysAgo(14), '배달 음식', food, card, 33_000),
-    entry(daysAgo(7), '마트 장보기', food, card, 89_000),
-    entry(daysAgo(3), '편의점', food, cash, 6_800),
-    entry(daysAgo(1), '카페', food, card, 18_500),
+  const dinnerItems = [
+    ['저녁 외식', 18_000], ['치킨 배달', 22_000], ['피자 배달', 28_000],
+    ['족발 배달', 32_000], ['삼겹살', 35_000], ['고깃집', 45_000],
+    ['중국집', 15_000], ['파스타 레스토랑', 22_000], ['일식당', 28_000],
+    ['샤부샤부', 38_000], ['보쌈 배달', 26_000], ['분식', 12_000],
+    ['버거킹', 10_000], ['국밥', 9_000], ['편의점 저녁', 6_500],
+  ] as const
 
-    // 교통비
-    entry(daysAgo(86), '지하철 충전', transport, cash, 50_000),
-    entry(daysAgo(56), '주유', transport, card, 80_000),
-    entry(daysAgo(26), '지하철 충전', transport, cash, 50_000),
-    entry(daysAgo(10), '택시', transport, cash, 15_000),
+  const cafeItems = [
+    ['스타벅스', 6_500], ['카페라떼', 5_000], ['편의점 커피', 2_000],
+    ['투썸플레이스', 6_800], ['이디야', 4_500], ['메가커피', 3_000],
+    ['할리스', 5_500], ['빽다방', 3_500],
+  ] as const
 
-    // 의료비
-    entry(daysAgo(45), '병원 진료', health, card, 18_000),
-    entry(daysAgo(15), '약국', health, cash, 9_500),
+  const groceryItems = [
+    ['이마트 장보기', 65_000], ['홈플러스 장보기', 58_000],
+    ['쿠팡 식료품', 72_000], ['재래시장 장보기', 45_000],
+    ['마트 장보기', 80_000], ['편의점 생필품', 18_000],
+  ] as const
 
-    // 문화/여가
-    entry(daysAgo(72), '영화 관람', culture, card, 28_000),
-    entry(daysAgo(48), '도서 구매', culture, card, 32_000),
-    entry(daysAgo(18), 'OTT 구독', culture, card, 13_900),
+  const cultureItems = [
+    ['영화 관람', 14_000], ['OTT 구독', 13_900], ['도서 구매', 18_000],
+    ['음악 스트리밍', 10_900], ['전시회 입장', 12_000], ['스포츠 관람', 45_000],
+    ['보드게임 카페', 25_000], ['콘서트 관람', 88_000], ['게임 구매', 33_000],
+    ['영화 관람', 14_000], ['독서실 이용', 8_000], ['수영장', 15_000],
+  ] as const
 
-    // 기타
-    entry(daysAgo(80), '생활용품 구입', other, card, 43_000),
-    entry(daysAgo(40), '미용실', other, cash, 30_000),
-    entry(daysAgo(8), '선물 구매', other, card, 55_000),
+  const otherItems = [
+    ['미용실', 32_000, cash], ['생활용품 구입', 45_000, card],
+    ['의류 구입', 89_000, card], ['선물 구매', 55_000, card],
+    ['세탁비', 15_000, cash], ['주방용품', 38_000, card],
+    ['가전제품 구입', 220_000, card], ['화장품', 67_000, card],
+    ['운동화 구입', 95_000, card], ['가방 구입', 75_000, card],
+    ['안경점', 180_000, card], ['문구류', 12_000, cash],
+  ] as const
 
-    // 카드값 결제
-    entry(daysAgo(62), '신용카드 결제', cardDebt, bank, 350_000),
-    entry(daysAgo(32), '신용카드 결제', cardDebt, bank, 420_000),
-  ]
+  const medItems = [
+    ['병원 진료', 18_000, card], ['약국', 8_500, cash],
+    ['치과 진료', 120_000, card], ['안과 진료', 15_000, card],
+    ['한의원', 30_000, cash], ['약국', 12_000, cash],
+  ] as const
+
+  const entries: JournalEntry[] = []
+
+  for (const { year, month, idx } of months) {
+    const lastDay = new Date(year, month, 0).getDate()
+
+    // Deterministic per-month RNG (linear congruential generator)
+    let seed = (year * 100 + month) * 6364136223846793005 | 0
+    function rng(max: number): number {
+      seed = (Math.imul(seed, 1664525) + 1013904223) | 0
+      return Math.abs(seed) % max
+    }
+
+    // ── Fixed monthly items ──
+    entries.push(makeEntry(fmt(year, month, 21), `${month}월 급여 수령`, bank, salary, 3_500_000))
+    entries.push(makeEntry(fmt(year, month, 1),  `${month}월 월세`,      housing, bank, 700_000))
+    entries.push(makeEntry(fmt(year, month, 10), `${month}월 통신비`,    telecom, bank, 55_000))
+    entries.push(makeEntry(fmt(year, month, 25), `${month}월 카드값 결제`, cardDebt, bank, 380_000 + rng(120_000)))
+
+    // ── Quarterly interest income ──
+    if (month % 3 === 1) {
+      entries.push(makeEntry(fmt(year, month, 15), '이자수입', bank, interestIncome, 25_000 + rng(15_000)))
+    }
+
+    // ── Irregular side income (~4 months out of 12) ──
+    if (idx % 3 === 1) entries.push(makeEntry(fmt(year, month, 8 + rng(6)), '프리랜서 작업비', cash, sideIncome, 250_000 + rng(350_000)))
+    if (idx % 5 === 2) entries.push(makeEntry(fmt(year, month, 12 + rng(5)), '중고물품 판매', cash, sideIncome, 40_000 + rng(120_000)))
+    if (idx % 7 === 4) entries.push(makeEntry(fmt(year, month, 18 + rng(4)), '블로그 광고 수익', bank, sideIncome, 70_000 + rng(90_000)))
+
+    // ── Daily transactions ──
+    for (let day = 1; day <= lastDay; day++) {
+      const d = dayOfWeek(year, month, day)
+      const isWeekend = d === 0 || d === 6
+      const dateStr = fmt(year, month, day)
+
+      // Lunch — every weekday
+      if (!isWeekend) {
+        const [desc, baseAmt] = lunchItems[rng(lunchItems.length)]
+        entries.push(makeEntry(dateStr, desc, food, rng(4) < 3 ? card : cash, baseAmt + rng(3_000)))
+      }
+
+      // Morning cafe/beverage — most days
+      if (rng(10) < (isWeekend ? 6 : 8)) {
+        const [desc, amt] = cafeItems[rng(cafeItems.length)]
+        entries.push(makeEntry(dateStr, desc, food, rng(3) < 2 ? card : cash, amt))
+      }
+
+      // Dinner / delivery — most evenings
+      if (rng(10) < (isWeekend ? 9 : 7)) {
+        const [desc, baseAmt] = dinnerItems[rng(dinnerItems.length)]
+        entries.push(makeEntry(dateStr, desc, food, rng(3) < 2 ? card : cash, baseAmt + rng(8_000)))
+      }
+
+      // Snack / convenience store — ~every other day
+      if (rng(2) === 0) {
+        entries.push(makeEntry(dateStr, '편의점', food, rng(2) === 0 ? card : cash, 2_500 + rng(5_000)))
+      }
+
+      // Grocery shopping — roughly twice a week
+      if (rng(4) === 0) {
+        const [desc, baseAmt] = groceryItems[rng(groceryItems.length)]
+        entries.push(makeEntry(dateStr, desc, food, card, baseAmt + rng(30_000)))
+      }
+
+      // Commute transit — every weekday
+      if (!isWeekend) {
+        entries.push(makeEntry(dateStr, '대중교통', transport, cash, 1_400 + rng(300)))
+        // Evening return transit
+        if (rng(10) < 8) {
+          entries.push(makeEntry(dateStr, '대중교통 귀가', transport, cash, 1_400 + rng(300)))
+        }
+        // Occasional taxi
+        if (rng(8) === 0) {
+          entries.push(makeEntry(dateStr, '택시', transport, cash, 6_000 + rng(14_000)))
+        }
+      }
+
+      // Weekend driving / transport
+      if (isWeekend && rng(3) === 0) {
+        if (rng(2) === 0) {
+          entries.push(makeEntry(dateStr, '주유', transport, card, 55_000 + rng(30_000)))
+        } else {
+          entries.push(makeEntry(dateStr, '버스/택시', transport, cash, 8_000 + rng(12_000)))
+        }
+      }
+
+      // Culture — roughly 1-2 per week
+      if (rng(7) === 0) {
+        const [desc, amt] = cultureItems[rng(cultureItems.length)]
+        entries.push(makeEntry(dateStr, desc, culture, card, amt))
+      }
+
+      // Medical — rare (~2/month)
+      if (rng(18) === 0) {
+        const [desc, amt, pay] = medItems[rng(medItems.length)]
+        entries.push(makeEntry(dateStr, desc, health, pay, amt))
+      }
+
+      // Other misc — ~3-4/month
+      if (rng(9) === 0) {
+        const [desc, amt, pay] = otherItems[rng(otherItems.length)]
+        entries.push(makeEntry(dateStr, desc, other, pay, amt))
+      }
+    }
+  }
+
+  return entries.sort((a, b) => b.date.localeCompare(a.date))
 }

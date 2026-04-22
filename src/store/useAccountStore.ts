@@ -10,6 +10,8 @@ interface NewAccountInput {
   description?: string
   color?: string
   icon?: string
+  startDate?: string
+  endDate?: string
 }
 
 interface AccountStore {
@@ -39,13 +41,15 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
         color: a.color ?? '#64748b',
         icon: a.icon ?? 'more',
         isActive: a.isActive ?? true,
+        startDate: a.startDate ?? '2000-01-01',
       }))
       saveAccounts(migrated)
       set({ accounts: migrated })
     }
   },
 
-  addAccount({ name, type, description, color = '#64748b', icon = 'more' }) {
+  addAccount({ name, type, description, color = '#64748b', icon = 'more', startDate, endDate }) {
+    const now = new Date().toISOString()
     const account: Account = {
       id: generateId(),
       name,
@@ -55,7 +59,9 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
       icon,
       isActive: true,
       isDefault: false,
-      createdAt: new Date().toISOString(),
+      startDate: startDate ?? now.slice(0, 10),
+      endDate,
+      createdAt: now,
     }
     const next = [...get().accounts, account]
     saveAccounts(next)

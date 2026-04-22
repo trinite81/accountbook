@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Pencil, Trash2, TrendingUp, TrendingDown, Wallet, Plus, X } from 'lucide-react'
+import { Pencil, Trash2, TrendingUp, TrendingDown, Wallet, Plus, X, ArrowRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -28,9 +28,7 @@ function getFilterRange(filter: DateFilter): { start: string; end: string } {
     d.setDate(d.getDate() - day + 1)
     return { start: d.toISOString().slice(0, 10), end: today }
   }
-  if (filter === 'month') {
-    return { start: today.slice(0, 7) + '-01', end: today }
-  }
+  if (filter === 'month') return { start: today.slice(0, 7) + '-01', end: today }
   return { start: '0000-01-01', end: '9999-12-31' }
 }
 
@@ -51,7 +49,6 @@ export function TransactionPage() {
     [entries, start, end]
   )
 
-  // 오늘 기준 수입/지출
   const today = todayISO()
   const { todayIncome, todayExpense } = useMemo(() => {
     let income = 0, expense = 0
@@ -66,7 +63,6 @@ export function TransactionPage() {
     return { todayIncome: income, todayExpense: expense }
   }, [entries, today, getById])
 
-  // 누적 잔액 (순자산)
   const netWorth = useMemo(() => {
     let balance = 0
     for (const entry of entries) {
@@ -119,8 +115,9 @@ export function TransactionPage() {
 
   return (
     <div className="space-y-4">
+
       {/* 요약 카드 */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <SummaryCard
           label="오늘 수입"
           value={todayIncome}
@@ -149,14 +146,9 @@ export function TransactionPage() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">거래 입력</CardTitle>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowAddForm((v) => !v)}
-              className="h-7 gap-1"
-            >
+            <Button variant="ghost" size="sm" onClick={() => setShowAddForm((v) => !v)} className="h-7 gap-1">
               {showAddForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-              {showAddForm ? '닫기' : '새 거래'}
+              <span className="hidden sm:inline">{showAddForm ? '닫기' : '새 거래'}</span>
             </Button>
           </div>
         </CardHeader>
@@ -173,11 +165,9 @@ export function TransactionPage() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base">
               거래 내역
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                {filteredEntries.length}건
-              </span>
+              <span className="ml-2 text-sm font-normal text-muted-foreground">{filteredEntries.length}건</span>
             </CardTitle>
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
               {(Object.keys(FILTER_LABELS) as DateFilter[]).map((f) => (
                 <button
                   key={f}
@@ -194,103 +184,152 @@ export function TransactionPage() {
             </div>
           </div>
         </CardHeader>
+
         <CardContent className="p-0">
           {filteredEntries.length === 0 ? (
             <p className="text-center py-10 text-sm text-muted-foreground">
               {FILTER_LABELS[filter]} 거래 내역이 없습니다.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40">
-                    <th className="text-left py-2.5 px-4 font-medium text-muted-foreground whitespace-nowrap">날짜</th>
-                    <th className="text-left py-2.5 px-4 font-medium text-muted-foreground">설명</th>
-                    <th className="text-left py-2.5 px-4 font-medium text-muted-foreground hidden sm:table-cell">차변</th>
-                    <th className="text-left py-2.5 px-4 font-medium text-muted-foreground hidden sm:table-cell">대변</th>
-                    <th className="text-right py-2.5 px-4 font-medium text-muted-foreground whitespace-nowrap">금액</th>
-                    <th className="py-2.5 px-4 w-20" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {filteredEntries.map((entry) => {
-                    const debitLine = entry.lines.find((l) => l.debit > 0)
-                    const creditLine = entry.lines.find((l) => l.credit > 0)
-                    const debitAcc = getById(debitLine?.accountId ?? '')
-                    const creditAcc = getById(creditLine?.accountId ?? '')
-                    const type = getEntryType(entry)
+            <>
+              {/* ── 모바일 카드 뷰 (sm 미만) ── */}
+              <div className="sm:hidden divide-y">
+                {filteredEntries.map((entry) => {
+                  const debitLine = entry.lines.find((l) => l.debit > 0)
+                  const creditLine = entry.lines.find((l) => l.credit > 0)
+                  const debitAcc = getById(debitLine?.accountId ?? '')
+                  const creditAcc = getById(creditLine?.accountId ?? '')
+                  const type = getEntryType(entry)
 
-                    return (
-                      <tr key={entry.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="py-3 px-4 text-muted-foreground whitespace-nowrap text-xs">
-                          {entry.date.slice(5).replace('-', '/')}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="font-medium">{entry.description}</span>
-                        </td>
-                        <td className="py-3 px-4 hidden sm:table-cell">
-                          {debitAcc && (
-                            <span className="flex items-center gap-1.5">
-                              <AccountIcon icon={debitAcc.icon} color={debitAcc.color} size="sm" />
-                              <span className="text-xs">{debitAcc.name}</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 hidden sm:table-cell">
-                          {creditAcc && (
-                            <span className="flex items-center gap-1.5">
-                              <AccountIcon icon={creditAcc.icon} color={creditAcc.color} size="sm" />
-                              <span className="text-xs">{creditAcc.name}</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-right font-semibold whitespace-nowrap">
-                          <span
-                            className={
-                              type === 'income'
-                                ? 'text-blue-600'
-                                : type === 'expense'
-                                ? 'text-red-500'
-                                : 'text-foreground'
-                            }
-                          >
+                  return (
+                    <div key={entry.id} className="px-4 py-3 hover:bg-muted/30 transition-colors">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm leading-tight truncate">{entry.description}</p>
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            {debitAcc && (
+                              <span className="flex items-center gap-1">
+                                <AccountIcon icon={debitAcc.icon} color={debitAcc.color} size="sm" />
+                                <span className="text-xs text-muted-foreground">{debitAcc.name}</span>
+                              </span>
+                            )}
+                            <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                            {creditAcc && (
+                              <span className="flex items-center gap-1">
+                                <AccountIcon icon={creditAcc.icon} color={creditAcc.color} size="sm" />
+                                <span className="text-xs text-muted-foreground">{creditAcc.name}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className={`font-bold text-sm ${
+                            type === 'income' ? 'text-blue-600' : type === 'expense' ? 'text-red-500' : 'text-foreground'
+                          }`}>
                             {type === 'income' ? '+' : type === 'expense' ? '-' : ''}
                             {formatCurrency(debitLine?.debit ?? 0)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                              onClick={() => setEditingEntry(entry)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                              onClick={() => deleteEntry(entry.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {entry.date.slice(5).replace('-', '/')}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-1 mt-1.5">
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                          onClick={() => setEditingEntry(entry)}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                          onClick={() => deleteEntry(entry.id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* ── 데스크톱/태블릿 테이블 뷰 (sm 이상) ── */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="text-left py-2.5 px-4 font-medium text-muted-foreground whitespace-nowrap">날짜</th>
+                      <th className="text-left py-2.5 px-4 font-medium text-muted-foreground">설명</th>
+                      <th className="text-left py-2.5 px-4 font-medium text-muted-foreground hidden md:table-cell">차변</th>
+                      <th className="text-left py-2.5 px-4 font-medium text-muted-foreground hidden md:table-cell">대변</th>
+                      <th className="text-right py-2.5 px-4 font-medium text-muted-foreground whitespace-nowrap">금액</th>
+                      <th className="py-2.5 px-4 w-20" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredEntries.map((entry) => {
+                      const debitLine = entry.lines.find((l) => l.debit > 0)
+                      const creditLine = entry.lines.find((l) => l.credit > 0)
+                      const debitAcc = getById(debitLine?.accountId ?? '')
+                      const creditAcc = getById(creditLine?.accountId ?? '')
+                      const type = getEntryType(entry)
+
+                      return (
+                        <tr key={entry.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="py-3 px-4 text-muted-foreground whitespace-nowrap text-xs">
+                            {entry.date.slice(5).replace('-', '/')}
+                          </td>
+                          <td className="py-3 px-4 font-medium max-w-[200px] truncate">
+                            {entry.description}
+                          </td>
+                          <td className="py-3 px-4 hidden md:table-cell">
+                            {debitAcc && (
+                              <span className="flex items-center gap-1.5">
+                                <AccountIcon icon={debitAcc.icon} color={debitAcc.color} size="sm" />
+                                <span className="text-xs">{debitAcc.name}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 hidden md:table-cell">
+                            {creditAcc && (
+                              <span className="flex items-center gap-1.5">
+                                <AccountIcon icon={creditAcc.icon} color={creditAcc.color} size="sm" />
+                                <span className="text-xs">{creditAcc.name}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right font-semibold whitespace-nowrap">
+                            <span className={
+                              type === 'income' ? 'text-blue-600'
+                                : type === 'expense' ? 'text-red-500'
+                                : 'text-foreground'
+                            }>
+                              {type === 'income' ? '+' : type === 'expense' ? '-' : ''}
+                              {formatCurrency(debitLine?.debit ?? 0)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                onClick={() => setEditingEntry(entry)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={() => deleteEntry(entry.id)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
 
       {/* 수정 다이얼로그 */}
       <Dialog open={!!editingEntry} onOpenChange={(open) => !open && setEditingEntry(null)}>
-        <DialogContent>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>거래 수정</DialogTitle>
           </DialogHeader>
@@ -319,11 +358,11 @@ function SummaryCard({
 }) {
   return (
     <div className="rounded-xl border bg-card p-3 sm:p-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <div className={`rounded-md p-1 ${bgClass} ${colorClass}`}>{icon}</div>
+      <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+        <p className="text-xs text-muted-foreground leading-tight">{label}</p>
+        <div className={`rounded-md p-1 ${bgClass} ${colorClass} hidden sm:block`}>{icon}</div>
       </div>
-      <p className={`text-base sm:text-lg font-bold leading-tight ${colorClass}`}>
+      <p className={`text-sm sm:text-lg font-bold leading-tight ${colorClass}`}>
         {formatCurrency(value)}
       </p>
     </div>

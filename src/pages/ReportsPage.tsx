@@ -1,19 +1,38 @@
 import { useMemo, useState } from 'react'
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cell as BarCell,
   PieChart, Pie, Cell, LineChart, Line, CartesianGrid,
 } from 'recharts'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AccountIcon } from '@/components/AccountIcon'
 import { useEntryStore } from '@/store/useEntryStore'
 import { useAccountStore } from '@/store/useAccountStore'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { ACCOUNT_TYPE_BADGE_CLASSES, ACCOUNT_TYPE_LABELS } from '@/types'
 import type { AccountType } from '@/types'
 
 type PeriodType = 'day' | 'week' | 'month' | 'year'
+
+interface DrillDownRow {
+  date: string
+  description: string
+  debitAccount: string
+  creditAccount: string
+  debitColor: string
+  creditColor: string
+  debitIcon: string
+  creditIcon: string
+  amount: number
+  type: 'income' | 'expense' | 'other'
+}
+
+interface DrillDown {
+  title: string
+  rows: DrillDownRow[]
+  source: 'bar' | 'pie'
+}
 
 const PIE_COLORS = ['#f97316', '#ef4444', '#a855f7', '#06b6d4', '#f59e0b', '#64748b', '#ec4899', '#84cc16', '#3b82f6']
 
@@ -29,20 +48,20 @@ export function ReportsPage() {
 
   const [period, setPeriod] = useState<PeriodType>('month')
   const [offset, setOffset] = useState(0)
+  const [drillDown, setDrillDown] = useState<DrillDown | null>(null)
+  const [selectedBarKey, setSelectedBarKey] = useState<string | null>(null)
+  const [selectedPieName, setSelectedPieName] = useState<string | null>(null)
 
-  // --- 기간 범위 계산 ---
   const { start, end, label, prevStart, prevEnd } = useMemo(
     () => computeRange(period, offset),
     [period, offset]
   )
 
-  // 현재 기간 거래
   const periodEntries = useMemo(
     () => entries.filter((e) => e.date >= start && e.date <= end),
     [entries, start, end]
   )
 
-  // 이전 기간 거래
   const prevEntries = useMemo(
     () => entries.filter((e) => e.date >= prevStart && e.date <= prevEnd),
     [entries, prevStart, prevEnd]
@@ -50,13 +69,11 @@ export function ReportsPage() {
 
   const { income, expense } = useMemo(() => sumIncomeExpense(periodEntries, accounts), [periodEntries, accounts])
   const { income: prevIncome, expense: prevExpense } = useMemo(() => sumIncomeExpense(prevEntries, accounts), [prevEntries, accounts])
-
   const net = income - expense
   const prevNet = prevIncome - prevExpense
 
-  // --- 비용 파이 차트 ---
   const expensePieData = useMemo(() => {
-    const map = new Map<string, { name: string; value: number; color: string; icon: string }>()
+    const map = new Map<string, { name: string; value: number; color: string; icon: string; accountId: string }>()
     for (const entry of periodEntries) {
       for (const line of entry.lines) {
         const acc = accounts.find((a) => a.id === line.accountId)
@@ -64,7 +81,7 @@ export function ReportsPage() {
           const prev = map.get(acc.id)
           map.set(acc.id, prev
             ? { ...prev, value: prev.value + line.debit }
-            : { name: acc.name, value: line.debit, color: acc.color, icon: acc.icon }
+            : { name: acc.name, value: line.debit, color: acc.color, icon: acc.icon, accountId: acc.id }
           )
         }
       }
@@ -72,14 +89,10 @@ export function ReportsPage() {
     return Array.from(map.values()).sort((a, b) => b.value - a.value)
   }, [periodEntries, accounts])
 
-  // --- 기간별 비교 막대 그래프 ---
   const barData = useMemo(() => buildBarData(period, offset, entries, accounts), [period, offset, entries, accounts])
-
-  // --- 잔액 추이 라인 차트 ---
   const balanceTrend = useMemo(() => buildBalanceTrend(entries, accounts), [entries, accounts])
 
-  // --- 계정별 상세 ---
-  const accountDetails = useMemo(() => {
+  const accountDetailsByType = useMemo(() => {
     const map = new Map<string, { debit: number; credit: number }>()
     for (const entry of periodEntries) {
       for (const line of entry.lines) {
@@ -87,17 +100,129 @@ export function ReportsPage() {
         map.set(line.accountId, { debit: prev.debit + line.debit, credit: prev.credit + line.credit })
       }
     }
-    return accounts
+    const rows = accounts
       .filter((a) => map.has(a.id))
       .map((a) => ({ account: a, ...map.get(a.id)! }))
-      .sort((a, b) => (b.debit + b.credit) - (a.debit + a.credit))
+
+    const TYPE_ORDER: AccountType[] = ['asset', 'liability', 'revenue', 'expense']
+    return TYPE_ORDER
+      .map((type) => ({
+        type,
+        rows: rows
+          .filter((r) => r.account.type === type)
+          .sort((a, b) => (b.debit + b.credit) - (a.debit + a.credit)),
+      }))
+      .filter((g) => g.rows.length > 0)
   }, [periodEntries, accounts])
+
+  // --- drill-down handlers ---
+
+  function handleBarClick(data: { start: string; end: string; fullLabel: string; label: string }, type: 'income' | 'expense') {
+    const key = `${data.label}-${type}`
+    if (selectedBarKey === key) {
+      setSelectedBarKey(null)
+      setDrillDown(null)
+      return
+    }
+    setSelectedBarKey(key)
+    setSelectedPieName(null)
+
+    const rangeEntries = entries.filter((e) => e.date >= data.start && e.date <= data.end)
+    const rows: DrillDownRow[] = []
+
+    for (const entry of rangeEntries) {
+      const debitLine = entry.lines.find((l) => l.debit > 0)
+      const creditLine = entry.lines.find((l) => l.credit > 0)
+      const debitAcc = accounts.find((a) => a.id === debitLine?.accountId)
+      const creditAcc = accounts.find((a) => a.id === creditLine?.accountId)
+
+      const isIncome = creditAcc?.type === 'revenue'
+      const isExpense = debitAcc?.type === 'expense'
+      if (type === 'income' && !isIncome) continue
+      if (type === 'expense' && !isExpense) continue
+
+      rows.push({
+        date: entry.date,
+        description: entry.description,
+        debitAccount: debitAcc?.name ?? '(삭제된 계정)',
+        creditAccount: creditAcc?.name ?? '(삭제된 계정)',
+        debitColor: debitAcc?.color ?? '#64748b',
+        creditColor: creditAcc?.color ?? '#64748b',
+        debitIcon: debitAcc?.icon ?? 'more',
+        creditIcon: creditAcc?.icon ?? 'more',
+        amount: type === 'income' ? (creditLine?.credit ?? 0) : (debitLine?.debit ?? 0),
+        type: type,
+      })
+    }
+
+    rows.sort((a, b) => b.date.localeCompare(a.date))
+    setDrillDown({
+      title: `${data.fullLabel} ${type === 'income' ? '수입' : '지출'} 내역 (${rows.length}건)`,
+      rows,
+      source: 'bar',
+    })
+  }
+
+  function handlePieClick(data: { name: string; accountId: string }) {
+    if (selectedPieName === data.name) {
+      setSelectedPieName(null)
+      setDrillDown(null)
+      return
+    }
+    setSelectedPieName(data.name)
+    setSelectedBarKey(null)
+
+    const rows: DrillDownRow[] = []
+    for (const entry of periodEntries) {
+      const debitLine = entry.lines.find((l) => l.accountId === data.accountId && l.debit > 0)
+      if (!debitLine) continue
+      const creditLine = entry.lines.find((l) => l.credit > 0)
+      const creditAcc = accounts.find((a) => a.id === creditLine?.accountId)
+      const debitAcc = accounts.find((a) => a.id === debitLine.accountId)
+      rows.push({
+        date: entry.date,
+        description: entry.description,
+        debitAccount: data.name,
+        creditAccount: creditAcc?.name ?? '(삭제된 계정)',
+        debitColor: debitAcc?.color ?? '#64748b',
+        creditColor: creditAcc?.color ?? '#64748b',
+        debitIcon: debitAcc?.icon ?? 'more',
+        creditIcon: creditAcc?.icon ?? 'more',
+        amount: debitLine.debit,
+        type: 'expense',
+      })
+    }
+
+    rows.sort((a, b) => b.date.localeCompare(a.date))
+    setDrillDown({
+      title: `${data.name} 지출 내역 (${rows.length}건)`,
+      rows,
+      source: 'pie',
+    })
+  }
+
+  function clearDrillDown() {
+    setDrillDown(null)
+    setSelectedBarKey(null)
+    setSelectedPieName(null)
+  }
+
+  function changePeriod(v: PeriodType) {
+    setPeriod(v)
+    setOffset(0)
+    clearDrillDown()
+  }
+
+  function changeOffset(next: number) {
+    setOffset(next)
+    clearDrillDown()
+  }
 
   return (
     <div className="space-y-5">
       {/* 기간 탭 + 네비게이션 */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <Tabs value={period} onValueChange={(v) => { setPeriod(v as PeriodType); setOffset(0) }}>
+        <Tabs value={period} onValueChange={(v) => changePeriod(v as PeriodType)}>
           <TabsList>
             <TabsTrigger value="day">일별</TabsTrigger>
             <TabsTrigger value="week">주별</TabsTrigger>
@@ -106,13 +231,13 @@ export function ReportsPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2 text-sm">
-          <button className="p-1 rounded border hover:bg-accent" onClick={() => setOffset((p) => p + 1)}>
+          <button className="p-1 rounded border hover:bg-accent" onClick={() => changeOffset(offset + 1)}>
             <ChevronLeft className="h-4 w-4" />
           </button>
           <span className="w-32 text-center font-medium text-sm">{label}</span>
           <button
             className="p-1 rounded border hover:bg-accent disabled:opacity-40"
-            onClick={() => setOffset((p) => Math.max(0, p - 1))}
+            onClick={() => changeOffset(Math.max(0, offset - 1))}
             disabled={offset === 0}
           >
             <ChevronRight className="h-4 w-4" />
@@ -130,7 +255,10 @@ export function ReportsPage() {
       {/* 수입 vs 지출 막대 그래프 */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">수입 vs 지출 비교</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">수입 vs 지출 비교</CardTitle>
+            <p className="text-xs text-muted-foreground">막대를 클릭하면 상세 내역이 표시됩니다</p>
+          </div>
         </CardHeader>
         <CardContent>
           {barData.length === 0 ? (
@@ -143,19 +271,55 @@ export function ReportsPage() {
                 <YAxis tickFormatter={formatAmount} tick={{ fontSize: 11 }} width={45} />
                 <Tooltip formatter={(v: number) => formatCurrency(v)} />
                 <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="income" name="수입" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expense" name="지출" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                <Bar
+                  dataKey="income"
+                  name="수입"
+                  radius={[3, 3, 0, 0]}
+                  cursor="pointer"
+                  onClick={(data) => handleBarClick(data, 'income')}
+                >
+                  {barData.map((d) => (
+                    <BarCell
+                      key={d.label}
+                      fill="#3b82f6"
+                      opacity={selectedBarKey && selectedBarKey !== `${d.label}-income` ? 0.35 : 1}
+                    />
+                  ))}
+                </Bar>
+                <Bar
+                  dataKey="expense"
+                  name="지출"
+                  radius={[3, 3, 0, 0]}
+                  cursor="pointer"
+                  onClick={(data) => handleBarClick(data, 'expense')}
+                >
+                  {barData.map((d) => (
+                    <BarCell
+                      key={d.label}
+                      fill="#ef4444"
+                      opacity={selectedBarKey && selectedBarKey !== `${d.label}-expense` ? 0.35 : 1}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
         </CardContent>
+
+        {/* 막대 차트 drill-down */}
+        {drillDown?.source === 'bar' && (
+          <DrillDownPanel drillDown={drillDown} onClose={clearDrillDown} />
+        )}
       </Card>
 
       {/* 비용 파이 + 잔액 추이 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">지출 항목별 비중</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">지출 항목별 비중</CardTitle>
+              <p className="text-xs text-muted-foreground">클릭하면 상세 내역 표시</p>
+            </div>
           </CardHeader>
           <CardContent>
             {expensePieData.length === 0 ? (
@@ -172,9 +336,17 @@ export function ReportsPage() {
                       cy="50%"
                       outerRadius={70}
                       innerRadius={30}
+                      cursor="pointer"
+                      onClick={handlePieClick}
                     >
                       {expensePieData.map((d, i) => (
-                        <Cell key={i} fill={d.color ?? PIE_COLORS[i % PIE_COLORS.length]} />
+                        <Cell
+                          key={i}
+                          fill={d.color ?? PIE_COLORS[i % PIE_COLORS.length]}
+                          opacity={selectedPieName && selectedPieName !== d.name ? 0.35 : 1}
+                          stroke={selectedPieName === d.name ? '#1e293b' : 'none'}
+                          strokeWidth={selectedPieName === d.name ? 2 : 0}
+                        />
                       ))}
                     </Pie>
                     <Tooltip formatter={(v: number) => formatCurrency(v)} />
@@ -182,18 +354,29 @@ export function ReportsPage() {
                 </ResponsiveContainer>
                 <ul className="space-y-1 mt-1">
                   {expensePieData.slice(0, 6).map((d, i) => (
-                    <li key={i} className="flex items-center justify-between text-xs">
+                    <li
+                      key={i}
+                      className={`flex items-center justify-between text-xs rounded px-1 py-0.5 cursor-pointer transition-colors ${
+                        selectedPieName === d.name ? 'bg-muted font-semibold' : 'hover:bg-muted/50'
+                      }`}
+                      onClick={() => handlePieClick(d)}
+                    >
                       <span className="flex items-center gap-1.5">
                         <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: d.color ?? PIE_COLORS[i % PIE_COLORS.length] }} />
                         {d.name}
                       </span>
-                      <span className="font-medium">{formatCurrency(d.value)}</span>
+                      <span>{formatCurrency(d.value)}</span>
                     </li>
                   ))}
                 </ul>
               </>
             )}
           </CardContent>
+
+          {/* 파이 차트 drill-down */}
+          {drillDown?.source === 'pie' && (
+            <DrillDownPanel drillDown={drillDown} onClose={clearDrillDown} />
+          )}
         </Card>
 
         <Card>
@@ -224,7 +407,7 @@ export function ReportsPage() {
           <CardTitle className="text-base">계정별 상세 내역</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {accountDetails.length === 0 ? (
+          {accountDetailsByType.length === 0 ? (
             <p className="text-center py-8 text-sm text-muted-foreground">데이터가 없습니다.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -232,40 +415,58 @@ export function ReportsPage() {
                 <thead>
                   <tr className="border-b bg-muted/40">
                     <th className="text-left py-2.5 px-4 font-medium text-muted-foreground">계정</th>
-                    <th className="text-left py-2.5 px-4 font-medium text-muted-foreground hidden sm:table-cell">유형</th>
                     <th className="text-right py-2.5 px-4 font-medium text-muted-foreground">차변 합계</th>
                     <th className="text-right py-2.5 px-4 font-medium text-muted-foreground">대변 합계</th>
                     <th className="text-right py-2.5 px-4 font-medium text-muted-foreground">잔액</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
-                  {accountDetails.map(({ account, debit, credit }) => {
-                    const balance = account.type === 'liability' ? credit - debit : debit - credit
+                <tbody>
+                  {accountDetailsByType.map(({ type, rows }) => {
+                    const groupTotal = rows.reduce(
+                      (s, r) => s + (type === 'liability' ? r.credit - r.debit : r.debit - r.credit),
+                      0
+                    )
                     return (
-                      <tr key={account.id} className="hover:bg-muted/20">
-                        <td className="py-3 px-4">
-                          <span className="flex items-center gap-2">
-                            <AccountIcon icon={account.icon} color={account.color} size="sm" />
-                            <span className="font-medium text-sm">{account.name}</span>
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 hidden sm:table-cell">
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${ACCOUNT_TYPE_BADGE_CLASSES[account.type as AccountType]}`}>
-                            {ACCOUNT_TYPE_LABELS[account.type as AccountType]}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right text-blue-600 text-xs font-medium">
-                          {debit > 0 ? formatCurrency(debit) : '-'}
-                        </td>
-                        <td className="py-3 px-4 text-right text-red-500 text-xs font-medium">
-                          {credit > 0 ? formatCurrency(credit) : '-'}
-                        </td>
-                        <td className="py-3 px-4 text-right font-semibold text-xs">
-                          <span className={balance >= 0 ? 'text-green-600' : 'text-destructive'}>
-                            {formatCurrency(balance)}
-                          </span>
-                        </td>
-                      </tr>
+                      <>
+                        {/* 유형 구분 헤더 행 */}
+                        <tr key={`group-${type}`} className="bg-muted/60 border-y">
+                          <td colSpan={3} className="py-2 px-4">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ACCOUNT_TYPE_BADGE_CLASSES[type]}`}>
+                              {ACCOUNT_TYPE_LABELS[type]}
+                            </span>
+                          </td>
+                          <td className="py-2 px-4 text-right text-xs font-semibold">
+                            <span className={groupTotal >= 0 ? 'text-green-600' : 'text-destructive'}>
+                              {formatCurrency(groupTotal)}
+                            </span>
+                          </td>
+                        </tr>
+                        {/* 계정 행들 */}
+                        {rows.map(({ account, debit, credit }) => {
+                          const balance = account.type === 'liability' ? credit - debit : debit - credit
+                          return (
+                            <tr key={account.id} className="border-b last:border-b-0 hover:bg-muted/20">
+                              <td className="py-2.5 px-4 pl-6">
+                                <span className="flex items-center gap-2">
+                                  <AccountIcon icon={account.icon} color={account.color} size="sm" />
+                                  <span className="font-medium text-sm">{account.name}</span>
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-4 text-right text-blue-600 text-xs font-medium">
+                                {debit > 0 ? formatCurrency(debit) : '-'}
+                              </td>
+                              <td className="py-2.5 px-4 text-right text-red-500 text-xs font-medium">
+                                {credit > 0 ? formatCurrency(credit) : '-'}
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-semibold text-xs">
+                                <span className={balance >= 0 ? 'text-green-600' : 'text-destructive'}>
+                                  {formatCurrency(balance)}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </>
                     )
                   })}
                 </tbody>
@@ -274,6 +475,74 @@ export function ReportsPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+// ---- DrillDownPanel ----
+
+function DrillDownPanel({ drillDown, onClose }: { drillDown: DrillDown; onClose: () => void }) {
+  return (
+    <div className="border-t bg-muted/30">
+      <div className="flex items-center justify-between px-4 py-3">
+        <span className="text-sm font-semibold">{drillDown.title}</span>
+        <button onClick={onClose} className="rounded-md p-1 hover:bg-accent text-muted-foreground hover:text-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {drillDown.rows.length === 0 ? (
+        <p className="text-center pb-4 text-sm text-muted-foreground">해당 기간 내역이 없습니다.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border/60">
+                <th className="text-left py-2 px-4 font-medium text-muted-foreground whitespace-nowrap">날짜</th>
+                <th className="text-left py-2 px-4 font-medium text-muted-foreground">설명</th>
+                <th className="text-left py-2 px-4 font-medium text-muted-foreground hidden sm:table-cell">차변</th>
+                <th className="text-left py-2 px-4 font-medium text-muted-foreground hidden sm:table-cell">대변</th>
+                <th className="text-right py-2 px-4 font-medium text-muted-foreground">금액</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {drillDown.rows.map((row, i) => (
+                <tr key={i} className="hover:bg-muted/40">
+                  <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{formatDate(row.date)}</td>
+                  <td className="py-2 px-4 font-medium">{row.description}</td>
+                  <td className="py-2 px-4 hidden sm:table-cell">
+                    <span className="flex items-center gap-1">
+                      <AccountIcon icon={row.debitIcon} color={row.debitColor} size="sm" />
+                      {row.debitAccount}
+                    </span>
+                  </td>
+                  <td className="py-2 px-4 hidden sm:table-cell">
+                    <span className="flex items-center gap-1">
+                      <AccountIcon icon={row.creditIcon} color={row.creditColor} size="sm" />
+                      {row.creditAccount}
+                    </span>
+                  </td>
+                  <td className="py-2 px-4 text-right font-semibold whitespace-nowrap">
+                    <span className={row.type === 'income' ? 'text-blue-600' : 'text-red-500'}>
+                      {row.type === 'income' ? '+' : '-'}{formatCurrency(row.amount)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border bg-muted/20">
+                <td colSpan={4} className="py-2 px-4 text-xs text-muted-foreground font-medium text-right hidden sm:table-cell">합계</td>
+                <td colSpan={3} className="py-2 px-4 text-xs text-muted-foreground font-medium text-right sm:hidden">합계</td>
+                <td className="py-2 px-4 text-right font-bold text-sm">
+                  <span className={drillDown.rows[0]?.type === 'income' ? 'text-blue-600' : 'text-red-500'}>
+                    {formatCurrency(drillDown.rows.reduce((s, r) => s + r.amount, 0))}
+                  </span>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -316,10 +585,8 @@ function computeRange(period: PeriodType, offset: number) {
     const sun = new Date(d)
     sun.setDate(d.getDate() + 6)
     const sunStr = sun.toISOString().slice(0, 10)
-    const pMon = new Date(d)
-    pMon.setDate(d.getDate() - 7)
-    const pSun = new Date(pMon)
-    pSun.setDate(pMon.getDate() + 6)
+    const pMon = new Date(d); pMon.setDate(d.getDate() - 7)
+    const pSun = new Date(pMon); pSun.setDate(pMon.getDate() + 6)
     return {
       start: mon, end: sunStr,
       label: `${mon.slice(5).replace('-', '/')} ~ ${sunStr.slice(5).replace('-', '/')}`,
@@ -332,18 +599,17 @@ function computeRange(period: PeriodType, offset: number) {
     const m = now.getMonth() - offset
     const d = new Date(y, m, 1)
     const lastDay = new Date(y, m + 1, 0)
-    const s = d.toISOString().slice(0, 10)
-    const e = lastDay.toISOString().slice(0, 10)
     const pd = new Date(y, m - 1, 1)
     const plast = new Date(y, m, 0)
     return {
-      start: s, end: e,
+      start: d.toISOString().slice(0, 10),
+      end: lastDay.toISOString().slice(0, 10),
       label: `${d.getFullYear()}년 ${d.getMonth() + 1}월`,
-      prevStart: pd.toISOString().slice(0, 10), prevEnd: plast.toISOString().slice(0, 10),
+      prevStart: pd.toISOString().slice(0, 10),
+      prevEnd: plast.toISOString().slice(0, 10),
     }
   }
 
-  // year
   const y = now.getFullYear() - offset
   return {
     start: `${y}-01-01`, end: `${y}-12-31`,
@@ -365,7 +631,14 @@ function buildBarData(
     const { start, end, label } = computeRange(period, o)
     const sub = entries.filter((e) => e.date >= start && e.date <= end)
     const { income, expense } = sumIncomeExpense(sub, accounts)
-    return { label: label.replace(/년|월/g, '').trim(), income, expense }
+    return {
+      label: label.replace(/년|월/g, '').trim(),
+      fullLabel: label,
+      income,
+      expense,
+      start,
+      end,
+    }
   })
 }
 
@@ -375,7 +648,6 @@ function buildBalanceTrend(
 ) {
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date))
   let balance = 0
-  const result: { date: string; balance: number }[] = []
   const dateMap = new Map<string, number>()
 
   for (const entry of sorted) {
@@ -388,11 +660,7 @@ function buildBalanceTrend(
     dateMap.set(entry.date, balance)
   }
 
-  for (const [date, bal] of dateMap.entries()) {
-    result.push({ date, balance: bal })
-  }
-
-  return result
+  return Array.from(dateMap.entries()).map(([date, bal]) => ({ date, balance: bal }))
 }
 
 function MetricCard({ label, value, color, prev }: { label: string; value: number; color: string; prev: number }) {

@@ -26,15 +26,33 @@ interface EntryFormProps {
   submitLabel?: string
 }
 
+function isEligibleForDate(a: { isActive: boolean; startDate: string; endDate?: string }, date: string) {
+  if (!a.isActive) return false
+  if (date < a.startDate) return false
+  if (a.endDate && date > a.endDate) return false
+  return true
+}
+
 export function EntryForm({ initialValues, onSubmit, onCancel, submitLabel = '저장' }: EntryFormProps) {
   const accounts = useAccountStore((s) => s.accounts)
-  const activeAccounts = accounts.filter((a) => a.isActive)
 
   const [date, setDate] = useState(initialValues?.date ?? todayISO())
   const [description, setDescription] = useState(initialValues?.description ?? '')
   const [amount, setAmount] = useState(initialValues?.amount ? String(initialValues.amount) : '')
   const [debitId, setDebitId] = useState(initialValues?.debitAccountId ?? '')
   const [creditId, setCreditId] = useState(initialValues?.creditAccountId ?? '')
+
+  function handleDateChange(newDate: string) {
+    setDate(newDate)
+    if (debitId) {
+      const acc = accounts.find((a) => a.id === debitId)
+      if (acc && !isEligibleForDate(acc, newDate)) setDebitId('')
+    }
+    if (creditId) {
+      const acc = accounts.find((a) => a.id === creditId)
+      if (acc && !isEligibleForDate(acc, newDate)) setCreditId('')
+    }
+  }
 
   const isValid = description.trim() && Number(amount) > 0 && debitId && creditId && debitId !== creditId
 
@@ -44,10 +62,11 @@ export function EntryForm({ initialValues, onSubmit, onCancel, submitLabel = '�
     onSubmit({ date, description: description.trim(), amount: Number(amount), debitAccountId: debitId, creditAccountId: creditId })
   }
 
+  const eligibleAccounts = accounts.filter((a) => isEligibleForDate(a, date))
   const groupedAccounts = ACCOUNT_TYPE_ORDER.map((type) => ({
     type,
     label: ACCOUNT_TYPE_LABELS[type],
-    accounts: activeAccounts.filter((a) => a.type === type),
+    accounts: eligibleAccounts.filter((a) => a.type === type),
   })).filter((g) => g.accounts.length > 0)
 
   return (
@@ -55,7 +74,7 @@ export function EntryForm({ initialValues, onSubmit, onCancel, submitLabel = '�
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="space-y-1.5">
           <Label htmlFor="ef-date">날짜</Label>
-          <Input id="ef-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          <Input id="ef-date" type="date" value={date} onChange={(e) => handleDateChange(e.target.value)} required />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="ef-desc">거래 설명</Label>
