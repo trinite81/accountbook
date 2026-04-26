@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BookOpen, Settings, BarChart2, BookMarked } from 'lucide-react'
+import { BookOpen, Settings, BarChart2, BookMarked, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/useAuthStore'
 
 const navItems = [
   { to: '/', label: '거래입력', icon: BookOpen },
@@ -9,6 +10,9 @@ const navItems = [
 ]
 
 export function Layout() {
+  const { user, signOut } = useAuthStore()
+  const email = user?.email ?? ''
+
   return (
     <div className="min-h-screen bg-background flex">
 
@@ -42,6 +46,18 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* 사용자 / 로그아웃 */}
+        <div className="p-3 border-t">
+          <p className="text-xs text-muted-foreground truncate px-2 mb-1">{email}</p>
+          <button
+            onClick={() => signOut()}
+            className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            로그아웃
+          </button>
+        </div>
       </aside>
 
       {/* ── 모바일/태블릿 상단 헤더 (<lg) ── */}
