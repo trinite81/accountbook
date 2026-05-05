@@ -319,19 +319,28 @@ function SharingSection() {
     }
 
     // 초대 생성
-    const { error } = await supabase.from('invitations').insert({
-      book_id: book.id,
-      from_user_id: user.id,
-      from_email: user.email,
-      to_email: inviteEmail.trim().toLowerCase(),
-      status: 'pending',
-    })
+    const { data: invData, error } = await supabase
+      .from('invitations')
+      .insert({
+        book_id: book.id,
+        from_user_id: user.id,
+        from_email: user.email,
+        to_email: inviteEmail.trim().toLowerCase(),
+        status: 'pending',
+      })
+      .select('id')
+      .single()
 
     if (error) {
       setMessage({ type: 'err', text: '초대 전송 실패. 다시 시도해주세요.' })
       setLoading(false)
       return
     }
+
+    // 미가입자에게 이메일 발송 시도 (Edge Function — 실패해도 초대 자체는 유효)
+    supabase.functions.invoke('send-invite-email', {
+      body: { toEmail: inviteEmail.trim().toLowerCase(), fromEmail: user.email, invitationId: invData.id },
+    }).catch(() => { /* 이메일 발송 실패는 무시 */ })
 
     setInviteEmail('')
     setMessage({ type: 'ok', text: '초대를 보냈습니다. 상대방이 앱에 로그인하면 알림이 표시됩니다.' })

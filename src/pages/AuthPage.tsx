@@ -12,11 +12,16 @@ export function AuthPage() {
   const navigate = useNavigate()
   const { user, signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuthStore()
 
-  const [mode, setMode] = useState<Mode>('login')
+  // URL에 ?invite=... 가 있으면 회원가입 탭으로 먼저 보여주고 안내 메시지 표시
+  const inviteId = new URLSearchParams(window.location.search).get('invite')
+
+  const [mode, setMode] = useState<Mode>(inviteId ? 'signup' : 'login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [info, setInfo] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(
+    inviteId ? '초대를 받으셨군요! 회원가입 후 가계부 공유 알림을 확인하세요.' : null
+  )
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
