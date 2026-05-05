@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Plus, Trash2, RotateCcw, Download, Upload, Database, Pencil, CalendarRange } from 'lucide-react'
+import { Plus, Trash2, RotateCcw, Download, Upload, Database, Pencil, CalendarRange, Users, Unlink, Send, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,11 +10,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { AccountIcon } from '@/components/AccountIcon'
 import { useAccountStore } from '@/store/useAccountStore'
 import { useEntryStore } from '@/store/useEntryStore'
+import { useAuthStore } from '@/store/useAuthStore'
+import { useBookStore } from '@/store/useBookStore'
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_BADGE_CLASSES } from '@/types'
 import { ICON_OPTIONS, COLOR_OPTIONS } from '@/lib/iconMap'
 import { generateSampleEntries } from '@/lib/sampleData'
 import { exportJSON, exportCSV, parseImportJSON } from '@/lib/exportImport'
 import { todayISO } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 import type { AccountType, Account } from '@/types'
 
 const ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'revenue', 'expense']
@@ -123,6 +126,9 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
+      {/* 가계부 공유 섹션 */}
+      <SharingSection />
+
       {/* 헤더 */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-xl font-bold">계정 설정</h1>
@@ -267,6 +273,178 @@ export function SettingsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// ── 가계부 공유 섹션 ─────────────────────────────────────────────
+
+function SharingSection() {
+  const { user } = useAuthStore()
+  const { book, members, init: initBook } = useBookStore()
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  const isSharing = members.length > 1
+  const otherMembers = members.filter((m) => m.userId !== user?.id)
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault()
+    if (!book || !user || !inviteEmail.trim()) return
+    if (inviteEmail.trim().toLowerCase() === user.email?.toLowerCase()) {
+      setMessage({ type: 'err', text: '본인 이메일은 초대할 수 없습니다.' })
+      return
+    }
+    if (isSharing) {
+      setMessage({ type: 'err', text: '이미 공유 중입니다. 공유 해제 후 새 초대를 보낼 수 있습니다.' })
+      return
+    }
+
+    setLoading(true)
+    setMessage(null)
+
+    // 동일 이메일로 이미 pending 초대가 있는지 확인
+    const { data: existing } = await supabase
+      .from('invitations')
+      .select('id, status')
+      .eq('book_id', book.id)
+      .eq('to_email', inviteEmail.trim().toLowerCase())
+      .eq('status', 'pending')
+      .limit(1)
+
+    if (existing && existing.length > 0) {
+      setMessage({ type: 'err', text: '이미 해당 이메일로 초대를 보냈습니다.' })
+      setLoading(false)
+      return
+    }
+
+    // 초대 생성
+    const { error } = await supabase.from('invitations').insert({
+      book_id: book.id,
+      from_user_id: user.id,
+      from_email: user.email,
+      to_email: inviteEmail.trim().toLowerCase(),
+      status: 'pending',
+    })
+
+    if (error) {
+      setMessage({ type: 'err', text: '초대 전송 실패. 다시 시도해주세요.' })
+      setLoading(false)
+      return
+    }
+
+    setInviteEmail('')
+    setMessage({ type: 'ok', text: '초대를 보냈습니다. 상대방이 앱에 로그인하면 알림이 표시됩니다.' })
+    setLoading(false)
+  }
+
+  async function handleUnshareRequest() {
+    if (!book || !user) return
+    if (!confirm('공유 해제를 요청하시겠습니까?\n모든 멤버가 수락하면 가계부가 분리됩니다.')) return
+
+    setLoading(true)
+
+    // unshare_request 생성
+    const { data: req, error } = await supabase
+      .from('unshare_requests')
+      .insert({ book_id: book.id, requested_by: user.id })
+      .select()
+      .single()
+
+    if (error || !req) {
+      setMessage({ type: 'err', text: '공유 해제 요청 실패.' })
+      setLoading(false)
+      return
+    }
+
+    // 요청자 본인은 자동 승인
+    await supabase.from('unshare_approvals').insert({ request_id: req.id, user_id: user.id })
+
+    // 나머지 멤버에게 알림 전송
+    const notifRows = otherMembers.map((m) => ({
+      user_id: m.userId,
+      type: 'unshare_request',
+      payload: {
+        unshareRequestId: req.id,
+        requestedByEmail: user.email,
+      },
+    }))
+    if (notifRows.length > 0) {
+      await supabase.from('notifications').insert(notifRows)
+    }
+
+    setMessage({ type: 'ok', text: '공유 해제 요청을 보냈습니다. 모든 멤버가 수락하면 분리됩니다.' })
+    await initBook()
+    setLoading(false)
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Users className="h-4 w-4" /> 가계부 공유
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isSharing ? (
+          // 공유 중 상태
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">현재 공유 중인 멤버</p>
+            <ul className="space-y-2">
+              {members.map((m) => (
+                <li key={m.userId} className="flex items-center gap-2 text-sm">
+                  <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                  <span>{m.userId === user?.id ? `${user.email} (나)` : `멤버 (${m.role})`}</span>
+                  {m.role === 'owner' && m.userId !== user?.id && (
+                    <span className="text-xs text-muted-foreground">소유자</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-orange-600 border-orange-200 hover:bg-orange-50"
+              onClick={handleUnshareRequest}
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unlink className="h-3.5 w-3.5" />}
+              공유 해제 요청
+            </Button>
+          </div>
+        ) : (
+          // 공유 안 함 상태 — 초대 폼
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              이메일 주소로 상대방을 초대할 수 있어요. 가입되어 있지 않으면 다음 로그인 시 알림이 표시됩니다.
+            </p>
+            <form onSubmit={handleInvite} className="flex gap-2">
+              <Input
+                type="email"
+                placeholder="초대할 이메일 주소"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="flex-1"
+                required
+              />
+              <Button type="submit" size="sm" disabled={loading} className="gap-1.5 shrink-0">
+                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                초대
+              </Button>
+            </form>
+          </div>
+        )}
+
+        {message && (
+          <p className={`text-xs ${message.type === 'ok' ? 'text-green-600' : 'text-red-500'}`}>
+            {message.text}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          * 한 번에 하나의 가계부만 공유할 수 있습니다.
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 
