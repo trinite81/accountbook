@@ -8,7 +8,7 @@ interface EntryStore {
   entries: JournalEntry[]
   init: () => Promise<void>
   addEntry: (date: string, description: string, lines: JournalEntryLine[]) => void
-  addEntries: (entries: JournalEntry[]) => void
+  addEntries: (entries: Omit<JournalEntry, 'bookId' | 'userId'>[]) => void
   updateEntry: (id: string, date: string, description: string, lines: JournalEntryLine[]) => void
   deleteEntry: (id: string) => void
   replaceAll: (entries: JournalEntry[]) => void
@@ -34,17 +34,21 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
 
   addEntry(date, description, lines) {
     const now = new Date().toISOString()
-    const entry: JournalEntry = { id: generateId(), date, description, lines, createdAt: now, updatedAt: now }
+    const userId = useAuthStore.getState().user?.id ?? ''
+    // bookId는 Step 2(useBookStore)에서 주입됨. 임시로 기존 entry에서 가져옴.
+    const bookId = get().entries[0]?.bookId ?? ''
+    const entry: JournalEntry = { id: generateId(), bookId, userId, date, description, lines, createdAt: now, updatedAt: now }
     set({ entries: [entry, ...get().entries] })
-    const userId = useAuthStore.getState().user?.id
     if (userId) supabase.from('entries').insert(toRow(entry, userId))
   },
 
   addEntries(newEntries) {
-    const next = [...newEntries, ...get().entries].sort((a, b) => b.date.localeCompare(a.date))
+    const userId = useAuthStore.getState().user?.id ?? ''
+    const bookId = get().entries[0]?.bookId ?? ''
+    const full: JournalEntry[] = newEntries.map((e) => ({ ...e, bookId, userId }))
+    const next = [...full, ...get().entries].sort((a, b) => b.date.localeCompare(a.date))
     set({ entries: next })
-    const userId = useAuthStore.getState().user?.id
-    if (userId) supabase.from('entries').insert(newEntries.map((e) => toRow(e, userId)))
+    if (userId) supabase.from('entries').insert(full.map((e) => toRow(e, userId)))
   },
 
   updateEntry(id, date, description, lines) {
@@ -80,6 +84,7 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
 function toRow(e: JournalEntry, userId: string) {
   return {
     id: e.id,
+    book_id: e.bookId,
     user_id: userId,
     date: e.date,
     description: e.description,
@@ -92,6 +97,8 @@ function toRow(e: JournalEntry, userId: string) {
 function fromRow(r: Record<string, unknown>): JournalEntry {
   return {
     id: r.id as string,
+    bookId: r.book_id as string,
+    userId: r.user_id as string,
     date: r.date as string,
     description: r.description as string,
     lines: r.lines as JournalEntryLine[],

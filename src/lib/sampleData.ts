@@ -1,7 +1,7 @@
 import type { Account, JournalEntry } from '@/types'
 import { generateId } from './utils'
 
-export function generateSampleEntries(accounts: Account[]): JournalEntry[] {
+export function generateSampleEntries(accounts: Account[]): Omit<JournalEntry, 'bookId' | 'userId'>[] {
   const get = (name: string) => accounts.find((a) => a.name === name)?.id ?? ''
 
   const cash         = get('현금')
@@ -21,7 +21,8 @@ export function generateSampleEntries(accounts: Account[]): JournalEntry[] {
 
   const nowISO = new Date().toISOString()
 
-  function makeEntry(date: string, description: string, debitId: string, creditId: string, amount: number): JournalEntry {
+  // bookId, userId는 import 시점에 store가 주입
+  function makeEntry(date: string, description: string, debitId: string, creditId: string, amount: number): Omit<JournalEntry, 'bookId' | 'userId'> {
     return {
       id: generateId(),
       date,
@@ -104,7 +105,7 @@ export function generateSampleEntries(accounts: Account[]): JournalEntry[] {
     ['한의원', 30_000, cash], ['약국', 12_000, cash],
   ] as const
 
-  const entries: JournalEntry[] = []
+  const entries: Omit<JournalEntry, 'bookId' | 'userId'>[] = []
 
   for (const { year, month, idx } of months) {
     const lastDay = new Date(year, month, 0).getDate()

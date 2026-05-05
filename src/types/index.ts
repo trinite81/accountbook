@@ -2,6 +2,7 @@ export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expens
 
 export interface Account {
   id: string
+  bookId: string
   name: string
   type: AccountType
   description?: string
@@ -9,7 +10,7 @@ export interface Account {
   icon: string
   isActive: boolean
   isDefault: boolean
-  startDate: string    // YYYY-MM-DD, 이 날짜부터 사용 가능
+  startDate: string    // YYYY-MM-DD
   endDate?: string     // YYYY-MM-DD, undefined = 무제한
   createdAt: string
 }
@@ -22,12 +23,87 @@ export interface JournalEntryLine {
 
 export interface JournalEntry {
   id: string
+  bookId: string
+  userId: string       // 작성자 (수정/삭제 권한 확인용)
   date: string
   description: string
   lines: JournalEntryLine[]
   createdAt: string
   updatedAt: string
 }
+
+// ── 공유 가계부 ──────────────────────────────────────────────────
+
+export interface Book {
+  id: string
+  name: string
+  createdAt: string
+}
+
+export type BookMemberRole = 'owner' | 'member'
+
+export interface BookMember {
+  bookId: string
+  userId: string
+  role: BookMemberRole
+  joinedAt: string
+  email?: string       // 화면 표시용 (join 조회 시)
+}
+
+export type InvitationStatus = 'pending' | 'accepted' | 'rejected'
+
+export interface Invitation {
+  id: string
+  bookId: string
+  fromUserId: string
+  toEmail: string
+  status: InvitationStatus
+  createdAt: string
+}
+
+// ── 알림 ─────────────────────────────────────────────────────────
+
+export type NotificationType =
+  | 'invite'           // 초대 받음
+  | 'invite_accepted'  // 내 초대를 상대방이 수락
+  | 'account_merge'    // 계정 병합 확인 요청
+  | 'unshare_request'  // 공유 해제 요청
+  | 'entry_review'     // 거래 내역 검토 요청
+
+export interface NotificationPayload {
+  // invite
+  invitationId?: string
+  fromEmail?: string
+  bookName?: string
+  // account_merge
+  accountsToMerge?: Array<{ id: string; name: string; type: AccountType; color: string; icon: string }>
+  // unshare_request
+  unshareRequestId?: string
+  requestedByEmail?: string
+  // entry_review
+  entryId?: string
+  entryDescription?: string
+  entryDate?: string
+  requesterEmail?: string
+}
+
+export interface AppNotification {
+  id: string
+  userId: string
+  type: NotificationType
+  payload: NotificationPayload
+  read: boolean
+  createdAt: string
+}
+
+export interface UnshareRequest {
+  id: string
+  bookId: string
+  requestedBy: string
+  createdAt: string
+}
+
+// ── 상수 ─────────────────────────────────────────────────────────
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   asset: '자산',

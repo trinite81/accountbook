@@ -4,7 +4,8 @@ import { generateId } from './utils'
 const now = new Date().toISOString()
 const today = now.slice(0, 10)
 
-export const DEFAULT_ACCOUNTS: Account[] = [
+// bookId는 init 시점에 book으로부터 주입됨
+export const DEFAULT_ACCOUNTS: Omit<Account, 'bookId'>[] = [
   // 자산 — 파란색 계열
   { id: generateId(), name: '현금',       type: 'asset',     color: '#3b82f6', icon: 'wallet',   isActive: true, isDefault: true, startDate: today, createdAt: now },
   { id: generateId(), name: '은행계좌',   type: 'asset',     color: '#1d4ed8', icon: 'building', isActive: true, isDefault: true, startDate: today, createdAt: now },

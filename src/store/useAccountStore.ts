@@ -44,10 +44,12 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
     if (error) { console.error('[accounts] init error', error); return }
 
     if (!data || data.length === 0) {
-      // 첫 로그인 → 기본 계정 생성
-      const rows = DEFAULT_ACCOUNTS.map((a) => toRow(a, userId))
+      // 첫 로그인 → 기본 계정 생성 (bookId는 Step 2 useBookStore로 대체 예정)
+      const bookId = '' // placeholder: Step 2에서 book 생성 후 주입
+      const defaults: Account[] = DEFAULT_ACCOUNTS.map((a) => ({ ...a, bookId }))
+      const rows = defaults.map((a) => toRow(a, userId))
       await supabase.from('accounts').insert(rows)
-      set({ accounts: DEFAULT_ACCOUNTS })
+      set({ accounts: defaults })
     } else {
       set({ accounts: data.map(fromRow) })
     }
@@ -55,8 +57,11 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
 
   addAccount({ name, type, description, color = '#64748b', icon = 'more', startDate, endDate }) {
     const now = new Date().toISOString()
+    // bookId는 Step 2(useBookStore)에서 주입됨. 임시로 기존 계정에서 가져옴.
+    const bookId = get().accounts[0]?.bookId ?? ''
     const account: Account = {
       id: generateId(),
+      bookId,
       name,
       type,
       description,
@@ -96,11 +101,13 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
   },
 
   resetToDefaults() {
-    set({ accounts: DEFAULT_ACCOUNTS })
+    const bookId = get().accounts[0]?.bookId ?? ''
+    const defaults: Account[] = DEFAULT_ACCOUNTS.map((a) => ({ ...a, bookId }))
+    set({ accounts: defaults })
     const userId = useAuthStore.getState().user?.id
-    if (!userId) return
-    supabase.from('accounts').delete().eq('user_id', userId).then(() =>
-      supabase.from('accounts').insert(DEFAULT_ACCOUNTS.map((a) => toRow(a, userId)))
+    if (!userId || !bookId) return
+    supabase.from('accounts').delete().eq('book_id', bookId).then(() =>
+      supabase.from('accounts').insert(defaults.map((a) => toRow(a, userId)))
     )
   },
 
@@ -127,6 +134,7 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
 function toRow(a: Account, userId: string) {
   return {
     id: a.id,
+    book_id: a.bookId,
     user_id: userId,
     name: a.name,
     type: a.type,
@@ -144,6 +152,7 @@ function toRow(a: Account, userId: string) {
 function fromRow(r: Record<string, unknown>): Account {
   return {
     id: r.id as string,
+    bookId: r.book_id as string,
     name: r.name as string,
     type: r.type as AccountType,
     description: (r.description as string | null) ?? undefined,
