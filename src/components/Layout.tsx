@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { BookOpen, Settings, BarChart2, BookMarked, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/useAuthStore'
+import { NotificationPanel } from '@/components/NotificationPanel'
 
 const navItems = [
   { to: '/', label: '거래입력', icon: BookOpen },
@@ -47,9 +48,12 @@ export function Layout() {
           ))}
         </nav>
 
-        {/* 사용자 / 로그아웃 */}
-        <div className="p-3 border-t">
-          <p className="text-xs text-muted-foreground truncate px-2 mb-1">{email}</p>
+        {/* 사용자 / 알림 / 로그아웃 */}
+        <div className="p-3 border-t space-y-1">
+          <div className="flex items-center justify-between px-2 mb-1">
+            <p className="text-xs text-muted-foreground truncate flex-1">{email}</p>
+            <NotificationPanel />
+          </div>
           <button
             onClick={() => signOut()}
             className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
@@ -65,7 +69,8 @@ export function Layout() {
         <header className="lg:hidden sticky top-0 z-40 border-b bg-white/95 backdrop-blur">
           <div className="px-4 h-14 flex items-center gap-2">
             <BookMarked className="h-5 w-5 text-primary" />
-            <span className="font-bold text-lg tracking-tight">가계부</span>
+            <span className="font-bold text-lg tracking-tight flex-1">가계부</span>
+            <NotificationPanel />
           </div>
         </header>
 
