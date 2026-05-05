@@ -3,6 +3,7 @@ import type { JournalEntry, JournalEntryLine } from '@/types'
 import { generateId } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useBookStore } from '@/store/useBookStore'
 
 interface EntryStore {
   entries: JournalEntry[]
@@ -19,13 +20,13 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
   entries: [],
 
   async init() {
-    const userId = useAuthStore.getState().user?.id
-    if (!userId) return
+    const bookId = useBookStore.getState().book?.id
+    if (!bookId) return
 
     const { data, error } = await supabase
       .from('entries')
       .select('*')
-      .eq('user_id', userId)
+      .eq('book_id', bookId)
       .order('date', { ascending: false })
 
     if (error) { console.error('[entries] init error', error); return }
@@ -35,8 +36,7 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
   addEntry(date, description, lines) {
     const now = new Date().toISOString()
     const userId = useAuthStore.getState().user?.id ?? ''
-    // bookId는 Step 2(useBookStore)에서 주입됨. 임시로 기존 entry에서 가져옴.
-    const bookId = get().entries[0]?.bookId ?? ''
+    const bookId = useBookStore.getState().book?.id ?? ''
     const entry: JournalEntry = { id: generateId(), bookId, userId, date, description, lines, createdAt: now, updatedAt: now }
     set({ entries: [entry, ...get().entries] })
     if (userId) supabase.from('entries').insert(toRow(entry, userId))
@@ -44,7 +44,7 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
 
   addEntries(newEntries) {
     const userId = useAuthStore.getState().user?.id ?? ''
-    const bookId = get().entries[0]?.bookId ?? ''
+    const bookId = useBookStore.getState().book?.id ?? ''
     const full: JournalEntry[] = newEntries.map((e) => ({ ...e, bookId, userId }))
     const next = [...full, ...get().entries].sort((a, b) => b.date.localeCompare(a.date))
     set({ entries: next })
@@ -66,10 +66,11 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
   },
 
   replaceAll(entries) {
-    set({ entries })
     const userId = useAuthStore.getState().user?.id
-    if (!userId) return
-    supabase.from('entries').delete().eq('user_id', userId).then(() =>
+    const bookId = useBookStore.getState().book?.id
+    if (!userId || !bookId) return
+    set({ entries })
+    supabase.from('entries').delete().eq('book_id', bookId).then(() =>
       supabase.from('entries').insert(entries.map((e) => toRow(e, userId)))
     )
   },

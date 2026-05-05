@@ -10,14 +10,20 @@ import { AuthPage } from '@/pages/AuthPage'
 import { useAccountStore } from '@/store/useAccountStore'
 import { useEntryStore } from '@/store/useEntryStore'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useBookStore } from '@/store/useBookStore'
+import { useNotificationStore } from '@/store/useNotificationStore'
 import { supabase } from '@/lib/supabase'
 
 export default function App() {
   const { setUser, setLoading, loading, user } = useAuthStore()
+  const initBook = useBookStore((s) => s.init)
   const initAccounts = useAccountStore((s) => s.init)
   const initEntries = useEntryStore((s) => s.init)
+  const initNotifications = useNotificationStore((s) => s.init)
+  const clearBook = useBookStore((s) => s.clearData)
   const clearAccounts = useAccountStore((s) => s.clearData)
   const clearEntries = useEntryStore((s) => s.clearData)
+  const clearNotifications = useNotificationStore((s) => s.clearData)
 
   // 세션 감지
   useEffect(() => {
@@ -34,14 +40,19 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [setUser, setLoading])
 
-  // 로그인 시 데이터 로드, 로그아웃 시 초기화
+  // 로그인 시 데이터 로드 (book → accounts/entries/notifications 순서 보장)
   useEffect(() => {
     if (user) {
-      initAccounts()
-      initEntries()
+      initBook().then(() => {
+        initAccounts()
+        initEntries()
+        initNotifications()
+      })
     } else {
+      clearBook()
       clearAccounts()
       clearEntries()
+      clearNotifications()
     }
   }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 

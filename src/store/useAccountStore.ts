@@ -4,6 +4,7 @@ import { DEFAULT_ACCOUNTS } from '@/lib/defaultAccounts'
 import { generateId } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useBookStore } from '@/store/useBookStore'
 
 interface NewAccountInput {
   name: string
@@ -33,22 +34,21 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
 
   async init() {
     const userId = useAuthStore.getState().user?.id
-    if (!userId) return
+    const bookId = useBookStore.getState().book?.id
+    if (!userId || !bookId) return
 
     const { data, error } = await supabase
       .from('accounts')
       .select('*')
-      .eq('user_id', userId)
+      .eq('book_id', bookId)
       .order('created_at', { ascending: true })
 
     if (error) { console.error('[accounts] init error', error); return }
 
     if (!data || data.length === 0) {
-      // 첫 로그인 → 기본 계정 생성 (bookId는 Step 2 useBookStore로 대체 예정)
-      const bookId = '' // placeholder: Step 2에서 book 생성 후 주입
+      // 첫 로그인 — 기본 계정 생성
       const defaults: Account[] = DEFAULT_ACCOUNTS.map((a) => ({ ...a, bookId }))
-      const rows = defaults.map((a) => toRow(a, userId))
-      await supabase.from('accounts').insert(rows)
+      await supabase.from('accounts').insert(defaults.map((a) => toRow(a, userId)))
       set({ accounts: defaults })
     } else {
       set({ accounts: data.map(fromRow) })
@@ -57,8 +57,8 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
 
   addAccount({ name, type, description, color = '#64748b', icon = 'more', startDate, endDate }) {
     const now = new Date().toISOString()
-    // bookId는 Step 2(useBookStore)에서 주입됨. 임시로 기존 계정에서 가져옴.
-    const bookId = get().accounts[0]?.bookId ?? ''
+    const userId = useAuthStore.getState().user?.id
+    const bookId = useBookStore.getState().book?.id ?? ''
     const account: Account = {
       id: generateId(),
       bookId,
@@ -74,7 +74,6 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
       createdAt: now,
     }
     set({ accounts: [...get().accounts, account] })
-    const userId = useAuthStore.getState().user?.id
     if (userId) supabase.from('accounts').insert(toRow(account, userId))
   },
 
@@ -101,21 +100,22 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
   },
 
   resetToDefaults() {
-    const bookId = get().accounts[0]?.bookId ?? ''
+    const userId = useAuthStore.getState().user?.id
+    const bookId = useBookStore.getState().book?.id
+    if (!userId || !bookId) return
     const defaults: Account[] = DEFAULT_ACCOUNTS.map((a) => ({ ...a, bookId }))
     set({ accounts: defaults })
-    const userId = useAuthStore.getState().user?.id
-    if (!userId || !bookId) return
     supabase.from('accounts').delete().eq('book_id', bookId).then(() =>
       supabase.from('accounts').insert(defaults.map((a) => toRow(a, userId)))
     )
   },
 
   replaceAll(accounts) {
-    set({ accounts })
     const userId = useAuthStore.getState().user?.id
-    if (!userId) return
-    supabase.from('accounts').delete().eq('user_id', userId).then(() =>
+    const bookId = useBookStore.getState().book?.id
+    if (!userId || !bookId) return
+    set({ accounts })
+    supabase.from('accounts').delete().eq('book_id', bookId).then(() =>
       supabase.from('accounts').insert(accounts.map((a) => toRow(a, userId)))
     )
   },
