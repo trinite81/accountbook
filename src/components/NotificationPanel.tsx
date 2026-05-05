@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { Bell, X, Check, UserPlus, GitMerge, Unlink, FileSearch, CheckCheck } from 'lucide-react'
+import { Bell, X, Check, UserPlus, GitMerge, Unlink, FileSearch, CheckCheck, Loader2 } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { AccountIcon } from '@/components/AccountIcon'
+import { ACCOUNT_TYPE_LABELS } from '@/types'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { useNotificationStore } from '@/store/useNotificationStore'
@@ -327,7 +330,7 @@ function InviteContent({
   )
 }
 
-// ── 계정 병합 확인 (Step 5에서 full dialog로 교체 예정) ──────────
+// ── 계정 병합 확인 다이얼로그 ────────────────────────────────────
 
 function AccountMergeContent({
   notification: n,
@@ -336,74 +339,163 @@ function AccountMergeContent({
   notification: AppNotification
   setLoading: (v: boolean) => void
 }) {
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [done, setDone] = useState(false)
   const { markRead } = useNotificationStore()
-  const { user } = useAuthStore()
-  const bookId = useBookStore((s) => s.book?.id)
-  const initAccounts = useAccountStore((s) => s.init)
   const accounts = n.payload.accountsToMerge ?? []
-
-  async function addAll() {
-    if (!user || !bookId) return
-    setLoading(true)
-    const { generateId } = await import('@/lib/utils')
-    const now = new Date().toISOString()
-    const rows = accounts.map((a) => ({
-      id: generateId(),
-      book_id: bookId,
-      user_id: user.id,
-      name: a.name,
-      type: a.type,
-      color: a.color,
-      icon: a.icon,
-      is_active: true,
-      is_default: false,
-      start_date: now.slice(0, 10),
-      end_date: null,
-      description: null,
-      created_at: now,
-    }))
-    await supabase.from('accounts').insert(rows)
-    await markRead(n.id)
-    await initAccounts()
-    setDone(true)
-    setLoading(false)
-  }
-
-  async function skip() {
-    await markRead(n.id)
-    setDone(true)
-  }
 
   if (done) return <p className="text-sm text-muted-foreground">처리 완료</p>
   if (accounts.length === 0) return <p className="text-sm">계정이 이미 동기화되어 있어요.</p>
 
   return (
-    <div>
-      <p className="text-sm font-medium mb-1">상대방에게만 있는 계정이 있어요</p>
-      <ul className="text-xs text-muted-foreground space-y-0.5 mb-2">
-        {accounts.map((a) => (
-          <li key={a.id} className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: a.color }} />
-            {a.name}
-          </li>
-        ))}
-      </ul>
-      <div className="flex gap-2">
-        <button
-          onClick={addAll}
-          className="px-3 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90"
-        >
-          모두 추가
-        </button>
-        <button
-          onClick={skip}
-          className="px-3 py-1 rounded-md border text-xs font-medium hover:bg-accent"
-        >
-          건너뛰기
-        </button>
+    <>
+      <div>
+        <p className="text-sm font-medium mb-1">상대방에게만 있는 계정 {accounts.length}개</p>
+        <ul className="text-xs text-muted-foreground space-y-0.5 mb-2">
+          {accounts.slice(0, 3).map((a) => (
+            <li key={a.id} className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full shrink-0" style={{ background: a.color }} />
+              {a.name}
+            </li>
+          ))}
+          {accounts.length > 3 && (
+            <li className="text-muted-foreground">외 {accounts.length - 3}개...</li>
+          )}
+        </ul>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="px-3 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90"
+          >
+            계정 선택하기
+          </button>
+          <button
+            onClick={async () => { await markRead(n.id); setDone(true) }}
+            className="px-3 py-1 rounded-md border text-xs font-medium hover:bg-accent"
+          >
+            건너뛰기
+          </button>
+        </div>
       </div>
-    </div>
+      <AccountMergeDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        notification={n}
+        setLoading={setLoading}
+        onDone={() => setDone(true)}
+      />
+    </>
+  )
+}
+
+function AccountMergeDialog({
+  open, onOpenChange, notification: n, setLoading, onDone,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  notification: AppNotification
+  setLoading: (v: boolean) => void
+  onDone: () => void
+}) {
+  const { markRead } = useNotificationStore()
+  const { user } = useAuthStore()
+  const bookId = useBookStore((s) => s.book?.id)
+  const initAccounts = useAccountStore((s) => s.init)
+  const accounts = n.payload.accountsToMerge ?? []
+  const [selected, setSelected] = useState<Set<string>>(new Set(accounts.map((a) => a.id)))
+  const [saving, setSaving] = useState(false)
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function handleSave() {
+    if (!user || !bookId) return
+    setSaving(true)
+    setLoading(true)
+    const { generateId } = await import('@/lib/utils')
+    const now = new Date().toISOString()
+    const toAdd = accounts.filter((a) => selected.has(a.id))
+    if (toAdd.length > 0) {
+      const rows = toAdd.map((a) => ({
+        id: generateId(),
+        book_id: bookId,
+        user_id: user.id,
+        name: a.name,
+        type: a.type,
+        color: a.color,
+        icon: a.icon,
+        is_active: true,
+        is_default: false,
+        start_date: now.slice(0, 10),
+        end_date: null,
+        description: null,
+        created_at: now,
+      }))
+      await supabase.from('accounts').insert(rows)
+    }
+    await markRead(n.id)
+    await initAccounts()
+    setSaving(false)
+    setLoading(false)
+    onOpenChange(false)
+    onDone()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[calc(100%-2rem)] max-w-sm">
+        <DialogHeader>
+          <DialogTitle>계정 추가 확인</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          추가할 계정을 선택하세요. 선택 해제한 계정은 추가되지 않습니다.
+        </p>
+        <ul className="space-y-2 max-h-64 overflow-y-auto">
+          {accounts.map((a) => (
+            <li
+              key={a.id}
+              className="flex items-center gap-3 p-2 rounded-lg border cursor-pointer hover:bg-accent transition-colors"
+              onClick={() => toggle(a.id)}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(a.id)}
+                onChange={() => toggle(a.id)}
+                className="h-4 w-4 accent-primary"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <AccountIcon icon={a.icon} color={a.color} size="sm" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{a.name}</p>
+                <p className="text-xs text-muted-foreground">{ACCOUNT_TYPE_LABELS[a.type]}</p>
+              </div>
+              <span className="h-3 w-3 rounded-full shrink-0" style={{ background: a.color }} />
+            </li>
+          ))}
+        </ul>
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {selected.size}개 추가
+          </button>
+          <button
+            onClick={() => onOpenChange(false)}
+            className="px-4 py-2 rounded-lg border text-sm font-medium hover:bg-accent"
+          >
+            취소
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

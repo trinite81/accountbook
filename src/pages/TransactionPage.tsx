@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Pencil, Trash2, TrendingUp, TrendingDown, Wallet, Plus, X, ArrowRight } from 'lucide-react'
+import { Pencil, Trash2, TrendingUp, TrendingDown, Wallet, Plus, X, ArrowRight, MessageSquare } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -7,6 +7,9 @@ import { EntryForm, type EntryFormValues } from '@/components/EntryForm'
 import { AccountIcon } from '@/components/AccountIcon'
 import { useEntryStore } from '@/store/useEntryStore'
 import { useAccountStore } from '@/store/useAccountStore'
+import { useAuthStore } from '@/store/useAuthStore'
+import { useBookStore } from '@/store/useBookStore'
+import { supabase } from '@/lib/supabase'
 import { formatCurrency, todayISO } from '@/lib/utils'
 import type { JournalEntry } from '@/types'
 
@@ -38,10 +41,30 @@ export function TransactionPage() {
   const updateEntry = useEntryStore((s) => s.updateEntry)
   const deleteEntry = useEntryStore((s) => s.deleteEntry)
   const getById = useAccountStore((s) => s.getById)
+  const currentUserId = useAuthStore((s) => s.user?.id)
+  const currentUserEmail = useAuthStore((s) => s.user?.email)
+  const members = useBookStore((s) => s.members)
+  const isSharing = members.length > 1
 
   const [filter, setFilter] = useState<DateFilter>('month')
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null)
+  const [reviewSent, setReviewSent] = useState<Set<string>>(new Set())
+
+  async function handleReviewRequest(entry: JournalEntry) {
+    if (!currentUserId || !currentUserEmail) return
+    await supabase.from('notifications').insert({
+      user_id: entry.userId,
+      type: 'entry_review',
+      payload: {
+        entryId: entry.id,
+        entryDescription: entry.description,
+        entryDate: entry.date,
+        requesterEmail: currentUserEmail,
+      },
+    })
+    setReviewSent((prev) => new Set(prev).add(entry.id))
+  }
 
   const { start, end } = getFilterRange(filter)
   const filteredEntries = useMemo(
@@ -235,14 +258,29 @@ export function TransactionPage() {
                         </div>
                       </div>
                       <div className="flex justify-end gap-1 mt-1.5">
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                          onClick={() => setEditingEntry(entry)}>
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                          onClick={() => deleteEntry(entry.id)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                        {isSharing && entry.userId !== currentUserId && (
+                          <Button
+                            variant="ghost" size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-yellow-600"
+                            title="검토 요청"
+                            disabled={reviewSent.has(entry.id)}
+                            onClick={() => handleReviewRequest(entry)}
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                          </Button>
+                        )}
+                        {entry.userId === currentUserId && (
+                          <>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                              onClick={() => setEditingEntry(entry)}>
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                              onClick={() => deleteEntry(entry.id)}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                   )
@@ -306,14 +344,29 @@ export function TransactionPage() {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center justify-end gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                onClick={() => setEditingEntry(entry)}>
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                onClick={() => deleteEntry(entry.id)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {isSharing && entry.userId !== currentUserId && (
+                                <Button
+                                  variant="ghost" size="icon"
+                                  className="h-7 w-7 text-muted-foreground hover:text-yellow-600"
+                                  title="검토 요청"
+                                  disabled={reviewSent.has(entry.id)}
+                                  onClick={() => handleReviewRequest(entry)}
+                                >
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                              {entry.userId === currentUserId && (
+                                <>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    onClick={() => setEditingEntry(entry)}>
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                    onClick={() => deleteEntry(entry.id)}>
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
