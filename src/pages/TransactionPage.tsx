@@ -11,6 +11,8 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { useBookStore } from '@/store/useBookStore'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, todayISO } from '@/lib/utils'
+import { ViewFilterTabs } from '@/components/ViewFilterTabs'
+import { type ViewFilter, getUserColor } from '@/lib/viewFilter'
 import type { JournalEntry } from '@/types'
 
 type DateFilter = 'today' | 'week' | 'month' | 'all'
@@ -47,9 +49,17 @@ export function TransactionPage() {
   const isSharing = members.length > 1
 
   const [filter, setFilter] = useState<DateFilter>('month')
+  const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null)
   const [reviewSent, setReviewSent] = useState<Set<string>>(new Set())
+
+  const viewEntries = useMemo(
+    () => viewFilter === 'mine' && currentUserId
+      ? entries.filter((e) => e.userId === currentUserId)
+      : entries,
+    [entries, viewFilter, currentUserId]
+  )
 
   async function handleReviewRequest(entry: JournalEntry) {
     if (!currentUserId || !currentUserEmail) return
@@ -68,14 +78,14 @@ export function TransactionPage() {
 
   const { start, end } = getFilterRange(filter)
   const filteredEntries = useMemo(
-    () => entries.filter((e) => e.date >= start && e.date <= end),
-    [entries, start, end]
+    () => viewEntries.filter((e) => e.date >= start && e.date <= end),
+    [viewEntries, start, end]
   )
 
   const today = todayISO()
   const { todayIncome, todayExpense } = useMemo(() => {
     let income = 0, expense = 0
-    for (const entry of entries) {
+    for (const entry of viewEntries) {
       if (entry.date !== today) continue
       for (const line of entry.lines) {
         const acc = getById(line.accountId)
@@ -84,11 +94,11 @@ export function TransactionPage() {
       }
     }
     return { todayIncome: income, todayExpense: expense }
-  }, [entries, today, getById])
+  }, [viewEntries, today, getById])
 
   const netWorth = useMemo(() => {
     let balance = 0
-    for (const entry of entries) {
+    for (const entry of viewEntries) {
       for (const line of entry.lines) {
         const acc = getById(line.accountId)
         if (!acc) continue
@@ -97,7 +107,7 @@ export function TransactionPage() {
       }
     }
     return balance
-  }, [entries, getById])
+  }, [viewEntries, getById])
 
   function handleAdd(values: EntryFormValues) {
     addEntry(values.date, values.description, [
@@ -190,20 +200,25 @@ export function TransactionPage() {
               거래 내역
               <span className="ml-2 text-sm font-normal text-muted-foreground">{filteredEntries.length}건</span>
             </CardTitle>
-            <div className="flex gap-1 flex-wrap">
-              {(Object.keys(FILTER_LABELS) as DateFilter[]).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                    filter === f
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                  }`}
-                >
-                  {FILTER_LABELS[f]}
-                </button>
-              ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              {isSharing && (
+                <ViewFilterTabs value={viewFilter} onChange={setViewFilter} />
+              )}
+              <div className="flex gap-1 flex-wrap">
+                {(Object.keys(FILTER_LABELS) as DateFilter[]).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFilter(f)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      filter === f
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    }`}
+                  >
+                    {FILTER_LABELS[f]}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -225,7 +240,13 @@ export function TransactionPage() {
                   const type = getEntryType(entry)
 
                   return (
-                    <div key={entry.id} className="px-4 py-3 hover:bg-muted/30 transition-colors">
+                    <div
+                      key={entry.id}
+                      className="px-4 py-3 hover:bg-muted/30 transition-colors"
+                      style={viewFilter === 'compare' && isSharing
+                        ? { borderLeft: `3px solid ${getUserColor(entry.userId, members)}` }
+                        : undefined}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-sm leading-tight truncate">{entry.description}</p>
@@ -309,7 +330,13 @@ export function TransactionPage() {
                       const type = getEntryType(entry)
 
                       return (
-                        <tr key={entry.id} className="hover:bg-muted/30 transition-colors">
+                        <tr
+                          key={entry.id}
+                          className="hover:bg-muted/30 transition-colors"
+                          style={viewFilter === 'compare' && isSharing
+                            ? { borderLeft: `3px solid ${getUserColor(entry.userId, members)}` }
+                            : undefined}
+                        >
                           <td className="py-3 px-4 text-muted-foreground whitespace-nowrap text-xs">
                             {entry.date.slice(5).replace('-', '/')}
                           </td>

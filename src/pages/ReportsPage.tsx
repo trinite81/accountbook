@@ -9,6 +9,10 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AccountIcon } from '@/components/AccountIcon'
 import { useEntryStore } from '@/store/useEntryStore'
 import { useAccountStore } from '@/store/useAccountStore'
+import { useAuthStore } from '@/store/useAuthStore'
+import { useBookStore } from '@/store/useBookStore'
+import { ViewFilterTabs } from '@/components/ViewFilterTabs'
+import { type ViewFilter, getUserColor, USER_COLORS } from '@/lib/viewFilter'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { ACCOUNT_TYPE_BADGE_CLASSES, ACCOUNT_TYPE_LABELS } from '@/types'
 import type { AccountType } from '@/types'
@@ -45,9 +49,13 @@ function formatAmount(v: number) {
 export function ReportsPage() {
   const entries = useEntryStore((s) => s.entries)
   const accounts = useAccountStore((s) => s.accounts)
+  const currentUserId = useAuthStore((s) => s.user?.id)
+  const members = useBookStore((s) => s.members)
+  const isSharing = members.length > 1
 
   const [period, setPeriod] = useState<PeriodType>('month')
   const [offset, setOffset] = useState(0)
+  const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
   const [drillDown, setDrillDown] = useState<DrillDown | null>(null)
   const [selectedBarKey, setSelectedBarKey] = useState<string | null>(null)
   const [selectedPieName, setSelectedPieName] = useState<string | null>(null)
@@ -59,14 +67,21 @@ export function ReportsPage() {
     [period, offset]
   )
 
+  const viewEntries = useMemo(
+    () => viewFilter === 'mine' && currentUserId
+      ? entries.filter((e) => e.userId === currentUserId)
+      : entries,
+    [entries, viewFilter, currentUserId]
+  )
+
   const periodEntries = useMemo(
-    () => entries.filter((e) => e.date >= start && e.date <= end),
-    [entries, start, end]
+    () => viewEntries.filter((e) => e.date >= start && e.date <= end),
+    [viewEntries, start, end]
   )
 
   const prevEntries = useMemo(
-    () => entries.filter((e) => e.date >= prevStart && e.date <= prevEnd),
-    [entries, prevStart, prevEnd]
+    () => viewEntries.filter((e) => e.date >= prevStart && e.date <= prevEnd),
+    [viewEntries, prevStart, prevEnd]
   )
 
   const { income, expense } = useMemo(() => sumIncomeExpense(periodEntries, accounts), [periodEntries, accounts])
@@ -109,7 +124,7 @@ export function ReportsPage() {
   }, [periodEntries, accounts])
 
   const top5Expenses = useMemo(() => {
-    const rows: { date: string; description: string; account: string; accountColor: string; accountIcon: string; from: string; amount: number }[] = []
+    const rows: { date: string; description: string; account: string; accountColor: string; accountIcon: string; from: string; amount: number; userId: string }[] = []
     for (const entry of periodEntries) {
       const debitLine = entry.lines.find((l) => l.debit > 0)
       const creditLine = entry.lines.find((l) => l.credit > 0)
@@ -124,14 +139,28 @@ export function ReportsPage() {
         accountIcon: debitAcc.icon,
         from: creditAcc?.name ?? '(알 수 없음)',
         amount: debitLine?.debit ?? 0,
+        userId: entry.userId,
       })
     }
     return rows.sort((a, b) => b.amount - a.amount).slice(0, 5)
   }, [periodEntries, accounts])
 
-  const barData = useMemo(() => buildBarData(period, offset, entries, accounts), [period, offset, entries, accounts])
-  const netWorthTrend = useMemo(() => buildNetWorthTrend(entries, accounts), [entries, accounts])
-  const savingsRateTrend = useMemo(() => buildSavingsRateTrend(period, offset, entries, accounts), [period, offset, entries, accounts])
+  const barData = useMemo(() => buildBarData(period, offset, viewEntries, accounts), [period, offset, viewEntries, accounts])
+  const netWorthTrend = useMemo(() => buildNetWorthTrend(viewEntries, accounts), [viewEntries, accounts])
+  const savingsRateTrend = useMemo(() => buildSavingsRateTrend(period, offset, viewEntries, accounts), [period, offset, viewEntries, accounts])
+
+  const compareBarData = useMemo(
+    () => viewFilter === 'compare' ? buildBarDataCompare(period, offset, entries, accounts, members) : [],
+    [viewFilter, period, offset, entries, accounts, members]
+  )
+  const compareNetWorthTrend = useMemo(
+    () => viewFilter === 'compare' ? buildNetWorthTrendCompare(entries, accounts, members) : [],
+    [viewFilter, entries, accounts, members]
+  )
+  const compareSavingsRateTrend = useMemo(
+    () => viewFilter === 'compare' ? buildSavingsRateTrendCompare(period, offset, entries, accounts, members) : [],
+    [viewFilter, period, offset, entries, accounts, members]
+  )
   const { data: stackedExpenseData, activeAccounts: stackedAccounts } = useMemo(
     () => buildStackedExpenseData(period, offset, entries, accounts),
     [period, offset, entries, accounts]
@@ -255,28 +284,36 @@ export function ReportsPage() {
   return (
     <div className="space-y-5">
       {/* 기간 탭 + 네비게이션 */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <Tabs value={period} onValueChange={(v) => changePeriod(v as PeriodType)}>
-          <TabsList>
-            <TabsTrigger value="day">일별</TabsTrigger>
-            <TabsTrigger value="week">주별</TabsTrigger>
-            <TabsTrigger value="month">월별</TabsTrigger>
-            <TabsTrigger value="year">연별</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="flex items-center gap-2 text-sm">
-          <button className="p-1 rounded border hover:bg-accent" onClick={() => changeOffset(offset + 1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <span className="w-32 text-center font-medium text-sm">{label}</span>
-          <button
-            className="p-1 rounded border hover:bg-accent disabled:opacity-40"
-            onClick={() => changeOffset(Math.max(0, offset - 1))}
-            disabled={offset === 0}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <Tabs value={period} onValueChange={(v) => changePeriod(v as PeriodType)}>
+            <TabsList>
+              <TabsTrigger value="day">일별</TabsTrigger>
+              <TabsTrigger value="week">주별</TabsTrigger>
+              <TabsTrigger value="month">월별</TabsTrigger>
+              <TabsTrigger value="year">연별</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <div className="flex items-center gap-2 text-sm">
+            <button className="p-1 rounded border hover:bg-accent" onClick={() => changeOffset(offset + 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="w-32 text-center font-medium text-sm">{label}</span>
+            <button
+              className="p-1 rounded border hover:bg-accent disabled:opacity-40"
+              onClick={() => changeOffset(Math.max(0, offset - 1))}
+              disabled={offset === 0}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
+        {isSharing && (
+          <ViewFilterTabs
+            value={viewFilter}
+            onChange={(v) => { setViewFilter(v); clearDrillDown() }}
+          />
+        )}
       </div>
 
       {/* 요약 카드 */}
@@ -295,7 +332,25 @@ export function ReportsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {barData.length === 0 ? (
+          {viewFilter === 'compare' ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={compareBarData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                <YAxis tickFormatter={formatAmount} tick={{ fontSize: 11 }} width={45} />
+                <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                {members.flatMap((m, i) => {
+                  const color = USER_COLORS[i % USER_COLORS.length]
+                  const lbl = m.userId === currentUserId ? '나' : `멤버 ${i + 1}`
+                  return [
+                    <Bar key={`inc_${m.userId}`} dataKey={`income_${m.userId}`} name={`${lbl} 수입`} fill={color} stackId="income" radius={[3, 3, 0, 0]} />,
+                    <Bar key={`exp_${m.userId}`} dataKey={`expense_${m.userId}`} name={`${lbl} 지출`} fill={color} fillOpacity={0.4} stackId="expense" />,
+                  ]
+                })}
+              </BarChart>
+            </ResponsiveContainer>
+          ) : barData.length === 0 ? (
             <p className="text-center py-8 text-sm text-muted-foreground">데이터가 없습니다.</p>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
@@ -424,7 +479,33 @@ export function ReportsPage() {
             <CardTitle className="text-base">순자산 추이 <span className="text-xs font-normal text-muted-foreground">(자산 − 부채)</span></CardTitle>
           </CardHeader>
           <CardContent>
-            {netWorthTrend.length < 2 ? (
+            {viewFilter === 'compare' ? (
+              compareNetWorthTrend.length < 2 ? (
+                <p className="text-center py-8 text-sm text-muted-foreground">누적 거래가 부족합니다.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={compareNetWorthTrend} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => v.slice(5)} />
+                    <YAxis tickFormatter={formatAmount} tick={{ fontSize: 11 }} width={45} />
+                    <Tooltip formatter={(v: number) => formatCurrency(v)} labelFormatter={(l) => String(l)} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                    <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                    {members.map((m, i) => (
+                      <Line
+                        key={m.userId}
+                        type="monotone"
+                        dataKey={`netWorth_${m.userId}`}
+                        name={m.userId === currentUserId ? '나' : `멤버 ${i + 1}`}
+                        stroke={USER_COLORS[i % USER_COLORS.length]}
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              )
+            ) : netWorthTrend.length < 2 ? (
               <p className="text-center py-8 text-sm text-muted-foreground">누적 거래가 부족합니다.</p>
             ) : (
               <ResponsiveContainer width="100%" height={200}>
@@ -446,7 +527,35 @@ export function ReportsPage() {
             <CardTitle className="text-base">저축률 추이 <span className="text-xs font-normal text-muted-foreground">((수입−지출)÷수입)</span></CardTitle>
           </CardHeader>
           <CardContent>
-            {savingsRateTrend.every((d) => d.rate === null) ? (
+            {viewFilter === 'compare' ? (
+              compareSavingsRateTrend.every((d) => members.every((m) => d[`rate_${m.userId}`] === null)) ? (
+                <p className="text-center py-8 text-sm text-muted-foreground">수입 데이터가 없습니다.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={compareSavingsRateTrend} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                    <YAxis tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} width={45} />
+                    <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                    <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                    <ReferenceLine y={20} stroke="#22c55e" strokeDasharray="4 4" />
+                    {members.map((m, i) => (
+                      <Line
+                        key={m.userId}
+                        type="monotone"
+                        dataKey={`rate_${m.userId}`}
+                        name={m.userId === currentUserId ? '나' : `멤버 ${i + 1}`}
+                        stroke={USER_COLORS[i % USER_COLORS.length]}
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        connectNulls={false}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              )
+            ) : savingsRateTrend.every((d) => d.rate === null) ? (
               <p className="text-center py-8 text-sm text-muted-foreground">수입 데이터가 없습니다.</p>
             ) : (
               <ResponsiveContainer width="100%" height={200}>
@@ -547,6 +656,13 @@ export function ReportsPage() {
                     <p className="text-sm font-medium truncate">{row.description}</p>
                     <p className="text-xs text-muted-foreground">{formatDate(row.date)} · {row.account} ← {row.from}</p>
                   </div>
+                  {viewFilter === 'compare' && isSharing && (
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ background: getUserColor(row.userId, members) }}
+                      title={row.userId === currentUserId ? '나' : '멤버'}
+                    />
+                  )}
                   <span className="text-sm font-bold text-red-500 whitespace-nowrap shrink-0">{formatCurrency(row.amount)}</span>
                 </li>
               ))}
@@ -955,6 +1071,78 @@ function buildStackedExpenseData(
 
   const activeAccounts = expenseAccounts.filter((acc) => data.some((row) => (row[acc.id] as number) > 0))
   return { data, activeAccounts }
+}
+
+function buildBarDataCompare(
+  period: PeriodType, offset: number,
+  entries: ReturnType<typeof useEntryStore.getState>['entries'],
+  accounts: ReturnType<typeof useAccountStore.getState>['accounts'],
+  members: { userId: string }[]
+) {
+  const count = period === 'day' ? 14 : period === 'week' ? 8 : period === 'month' ? 6 : 5
+  return Array.from({ length: count }, (_, i) => {
+    const o = offset + (count - 1 - i)
+    const { start, end, label } = computeRange(period, o)
+    const sub = entries.filter((e) => e.date >= start && e.date <= end)
+    const row: Record<string, number | string> = { label: label.replace(/년|월/g, '').trim(), fullLabel: label, start, end }
+    for (const m of members) {
+      const userEntries = sub.filter((e) => e.userId === m.userId)
+      const { income, expense } = sumIncomeExpense(userEntries, accounts)
+      row[`income_${m.userId}`] = income
+      row[`expense_${m.userId}`] = expense
+    }
+    return row
+  })
+}
+
+function buildNetWorthTrendCompare(
+  entries: ReturnType<typeof useEntryStore.getState>['entries'],
+  accounts: ReturnType<typeof useAccountStore.getState>['accounts'],
+  members: { userId: string }[]
+) {
+  const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date))
+  const userTotals = new Map<string, { assets: number; liabilities: number }>()
+  for (const m of members) userTotals.set(m.userId, { assets: 0, liabilities: 0 })
+
+  const dateMap = new Map<string, Record<string, number>>()
+  for (const entry of sorted) {
+    const totals = userTotals.get(entry.userId)
+    if (!totals) continue
+    for (const line of entry.lines) {
+      const acc = accounts.find((a) => a.id === line.accountId)
+      if (!acc) continue
+      if (acc.type === 'asset') totals.assets += line.debit - line.credit
+      if (acc.type === 'liability') totals.liabilities += line.credit - line.debit
+    }
+    userTotals.set(entry.userId, { ...totals })
+    const dateRow: Record<string, number> = {}
+    for (const [uid, t] of userTotals) {
+      dateRow[`netWorth_${uid}`] = t.assets - t.liabilities
+    }
+    dateMap.set(entry.date, { ...dateRow })
+  }
+  return Array.from(dateMap.entries()).map(([date, vals]) => ({ date, ...vals }))
+}
+
+function buildSavingsRateTrendCompare(
+  period: PeriodType, offset: number,
+  entries: ReturnType<typeof useEntryStore.getState>['entries'],
+  accounts: ReturnType<typeof useAccountStore.getState>['accounts'],
+  members: { userId: string }[]
+) {
+  const count = period === 'day' ? 14 : period === 'week' ? 8 : period === 'month' ? 12 : 5
+  return Array.from({ length: count }, (_, i) => {
+    const o = offset + (count - 1 - i)
+    const { start, end, label } = computeRange(period, o)
+    const sub = entries.filter((e) => e.date >= start && e.date <= end)
+    const row: Record<string, number | string | null> = { label: label.replace(/년|월/g, '').trim() }
+    for (const m of members) {
+      const userEntries = sub.filter((e) => e.userId === m.userId)
+      const { income, expense } = sumIncomeExpense(userEntries, accounts)
+      row[`rate_${m.userId}`] = income > 0 ? Math.round(((income - expense) / income) * 1000) / 10 : null
+    }
+    return row
+  })
 }
 
 function MetricCard({ label, value, color, prev }: { label: string; value: number; color: string; prev: number }) {
