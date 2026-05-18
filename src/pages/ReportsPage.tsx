@@ -161,6 +161,39 @@ export function ReportsPage() {
     () => viewFilter === 'compare' ? buildSavingsRateTrendCompare(period, offset, entries, accounts, members) : [],
     [viewFilter, period, offset, entries, accounts, members]
   )
+  const compareExpensePieData = useMemo(() => {
+    if (viewFilter !== 'compare') return []
+    return members.map((m) => {
+      const map = new Map<string, { name: string; value: number; color: string; accountId: string }>()
+      for (const entry of periodEntries.filter((e) => e.userId === m.userId)) {
+        for (const line of entry.lines) {
+          const acc = accounts.find((a) => a.id === line.accountId)
+          if (acc?.type === 'expense' && line.debit > 0) {
+            const prev = map.get(acc.id)
+            map.set(acc.id, prev ? { ...prev, value: prev.value + line.debit } : { name: acc.name, value: line.debit, color: acc.color, accountId: acc.id })
+          }
+        }
+      }
+      return { userId: m.userId, data: Array.from(map.values()).sort((a, b) => b.value - a.value) }
+    })
+  }, [viewFilter, periodEntries, accounts, members])
+
+  const compareIncomePieData = useMemo(() => {
+    if (viewFilter !== 'compare') return []
+    return members.map((m) => {
+      const map = new Map<string, { name: string; value: number; color: string; accountId: string }>()
+      for (const entry of periodEntries.filter((e) => e.userId === m.userId)) {
+        for (const line of entry.lines) {
+          const acc = accounts.find((a) => a.id === line.accountId)
+          if (acc?.type === 'revenue' && line.credit > 0) {
+            const prev = map.get(acc.id)
+            map.set(acc.id, prev ? { ...prev, value: prev.value + line.credit } : { name: acc.name, value: line.credit, color: acc.color, accountId: acc.id })
+          }
+        }
+      }
+      return { userId: m.userId, data: Array.from(map.values()).sort((a, b) => b.value - a.value) }
+    })
+  }, [viewFilter, periodEntries, accounts, members])
   const { data: stackedExpenseData, activeAccounts: stackedAccounts } = useMemo(
     () => buildStackedExpenseData(period, offset, entries, accounts),
     [period, offset, entries, accounts]
@@ -323,6 +356,32 @@ export function ReportsPage() {
         <MetricCard label="순이익" value={net} color={net >= 0 ? 'text-green-600' : 'text-destructive'} prev={prevNet} />
       </div>
 
+      {/* 사람별 비교 요약 */}
+      {viewFilter === 'compare' && isSharing && (
+        <div className="flex gap-3">
+          {members.map((m, i) => {
+            const color = USER_COLORS[i % USER_COLORS.length]
+            const lbl = m.userId === currentUserId ? '나' : `멤버 ${i + 1}`
+            const memberEntries = periodEntries.filter((e) => e.userId === m.userId)
+            const { income: mIncome, expense: mExpense } = sumIncomeExpense(memberEntries, accounts)
+            const mNet = mIncome - mExpense
+            return (
+              <div key={m.userId} className="flex-1 rounded-xl border bg-card p-3" style={{ borderLeftColor: color, borderLeftWidth: 3 }}>
+                <p className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                  {lbl}
+                </p>
+                <div className="space-y-0.5 text-xs">
+                  <div className="flex justify-between"><span className="text-muted-foreground">수입</span><span className="text-blue-600 font-medium">{formatCurrency(mIncome)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">지출</span><span className="text-red-500 font-medium">{formatCurrency(mExpense)}</span></div>
+                  <div className="flex justify-between border-t pt-0.5 mt-0.5"><span className="text-muted-foreground">순이익</span><span className={`font-semibold ${mNet >= 0 ? 'text-green-600' : 'text-destructive'}`}>{formatCurrency(mNet)}</span></div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* 수입 vs 지출 막대 그래프 */}
       <Card>
         <CardHeader className="pb-2">
@@ -387,7 +446,46 @@ export function ReportsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {expensePieData.length === 0 ? (
+            {viewFilter === 'compare' ? (
+              <div className="grid grid-cols-2 gap-4">
+                {compareExpensePieData.map((ud, i) => {
+                  const color = USER_COLORS[i % USER_COLORS.length]
+                  const lbl = ud.userId === currentUserId ? '나' : `멤버 ${i + 1}`
+                  return (
+                    <div key={ud.userId}>
+                      <p className="text-xs font-semibold mb-1.5 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />{lbl}
+                      </p>
+                      {ud.data.length === 0 ? (
+                        <p className="text-center py-4 text-xs text-muted-foreground">지출 없음</p>
+                      ) : (
+                        <>
+                          <ResponsiveContainer width="100%" height={120}>
+                            <PieChart>
+                              <Pie data={ud.data} dataKey="value" cx="50%" cy="50%" outerRadius={48} innerRadius={18}>
+                                {ud.data.map((d, j) => <Cell key={j} fill={d.color ?? PIE_COLORS[j % PIE_COLORS.length]} />)}
+                              </Pie>
+                              <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <ul className="space-y-0.5 mt-1">
+                            {ud.data.slice(0, 4).map((d, j) => (
+                              <li key={j} className="flex items-center justify-between text-xs">
+                                <span className="flex items-center gap-1 min-w-0">
+                                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color ?? PIE_COLORS[j % PIE_COLORS.length] }} />
+                                  <span className="truncate">{d.name}</span>
+                                </span>
+                                <span className="shrink-0 ml-1">{formatCurrency(d.value)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : expensePieData.length === 0 ? (
               <p className="text-center py-8 text-sm text-muted-foreground">지출 내역 없음</p>
             ) : (
               <>
@@ -433,7 +531,46 @@ export function ReportsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {incomePieData.length === 0 ? (
+            {viewFilter === 'compare' ? (
+              <div className="grid grid-cols-2 gap-4">
+                {compareIncomePieData.map((ud, i) => {
+                  const color = USER_COLORS[i % USER_COLORS.length]
+                  const lbl = ud.userId === currentUserId ? '나' : `멤버 ${i + 1}`
+                  return (
+                    <div key={ud.userId}>
+                      <p className="text-xs font-semibold mb-1.5 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />{lbl}
+                      </p>
+                      {ud.data.length === 0 ? (
+                        <p className="text-center py-4 text-xs text-muted-foreground">수입 없음</p>
+                      ) : (
+                        <>
+                          <ResponsiveContainer width="100%" height={120}>
+                            <PieChart>
+                              <Pie data={ud.data} dataKey="value" cx="50%" cy="50%" outerRadius={48} innerRadius={18}>
+                                {ud.data.map((d, j) => <Cell key={j} fill={d.color ?? PIE_COLORS[j % PIE_COLORS.length]} />)}
+                              </Pie>
+                              <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <ul className="space-y-0.5 mt-1">
+                            {ud.data.slice(0, 4).map((d, j) => (
+                              <li key={j} className="flex items-center justify-between text-xs">
+                                <span className="flex items-center gap-1 min-w-0">
+                                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color ?? PIE_COLORS[j % PIE_COLORS.length] }} />
+                                  <span className="truncate">{d.name}</span>
+                                </span>
+                                <span className="shrink-0 ml-1">{formatCurrency(d.value)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : incomePieData.length === 0 ? (
               <p className="text-center py-8 text-sm text-muted-foreground">수입 내역 없음</p>
             ) : (
               <>
