@@ -14,7 +14,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { useBookStore } from '@/store/useBookStore'
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_BADGE_CLASSES } from '@/types'
 import { ICON_OPTIONS, COLOR_OPTIONS } from '@/lib/iconMap'
-import { generateSampleEntries } from '@/lib/sampleData'
+import { generateSampleEntries, generateSharedSampleEntries } from '@/lib/sampleData'
 import { exportJSON, exportCSV, parseImportJSON } from '@/lib/exportImport'
 import { todayISO } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -44,13 +44,17 @@ const DEFAULT_FORM: AccountFormState = {
 
 export function SettingsPage() {
   const { accounts, addAccount, updateAccount, deleteAccount, toggleActive, resetToDefaults, replaceAll } = useAccountStore()
-  const { entries, addEntries, replaceAll: replaceEntries } = useEntryStore()
+  const { entries, addEntries, addSharedEntries, replaceAll: replaceEntries } = useEntryStore()
 
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Account | null>(null)
   const [resetConfirm, setResetConfirm] = useState(false)
   const [form, setForm] = useState<AccountFormState>(DEFAULT_FORM)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const user = useAuthStore((s) => s.user)
+  const members = useBookStore((s) => s.members)
+  const isSharing = members.length > 1
 
   function openAdd() {
     setForm(DEFAULT_FORM)
@@ -91,6 +95,14 @@ export function SettingsPage() {
   function handleSampleData() {
     const samples = generateSampleEntries(accounts)
     addEntries(samples)
+  }
+
+  function handleSharedSampleData() {
+    if (!user?.id) return
+    const otherMember = members.find((m) => m.userId !== user.id)
+    if (!otherMember) return
+    const samples = generateSharedSampleEntries(accounts, user.id, otherMember.userId)
+    addSharedEntries(samples)
   }
 
   function handleExportJSON() {
@@ -217,10 +229,17 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={handleSampleData} className="gap-1.5 justify-start">
-              <Database className="h-4 w-4 text-purple-500" />
-              샘플 데이터 생성 (12개월치)
-            </Button>
+            {isSharing ? (
+              <Button variant="outline" size="sm" onClick={handleSharedSampleData} className="gap-1.5 justify-start">
+                <Database className="h-4 w-4 text-purple-500" />
+                2인 샘플 데이터 생성 (12개월치)
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={handleSampleData} className="gap-1.5 justify-start">
+                <Database className="h-4 w-4 text-purple-500" />
+                샘플 데이터 생성 (12개월치)
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleExportJSON} className="gap-1.5 justify-start">
               <Download className="h-4 w-4 text-blue-500" />
               JSON 내보내기

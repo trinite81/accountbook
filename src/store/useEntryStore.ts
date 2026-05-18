@@ -10,6 +10,7 @@ interface EntryStore {
   init: () => Promise<void>
   addEntry: (date: string, description: string, lines: JournalEntryLine[]) => void
   addEntries: (entries: Omit<JournalEntry, 'bookId' | 'userId'>[]) => void
+  addSharedEntries: (entries: Omit<JournalEntry, 'bookId'>[]) => void
   updateEntry: (id: string, date: string, description: string, lines: JournalEntryLine[]) => void
   deleteEntry: (id: string) => void
   replaceAll: (entries: JournalEntry[]) => void
@@ -49,6 +50,17 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
     const next = [...full, ...get().entries].sort((a, b) => b.date.localeCompare(a.date))
     set({ entries: next })
     if (userId) supabase.from('entries').insert(full.map((e) => toRow(e, userId)))
+  },
+
+  addSharedEntries(newEntries) {
+    const bookId = useBookStore.getState().book?.id ?? ''
+    const currentUserId = useAuthStore.getState().user?.id ?? ''
+    if (!currentUserId) return
+    const full: JournalEntry[] = newEntries.map((e) => ({ ...e, bookId }))
+    const next = [...full, ...get().entries].sort((a, b) => b.date.localeCompare(a.date))
+    set({ entries: next })
+    // RLS INSERT 정책은 book_id 멤버십만 확인하므로 다른 userId 행도 삽입 가능
+    supabase.from('entries').insert(full.map((e) => toRow(e, e.userId)))
   },
 
   updateEntry(id, date, description, lines) {
